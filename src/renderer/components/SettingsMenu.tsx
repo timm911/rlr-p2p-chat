@@ -8,6 +8,7 @@ import { getAccent, setAccent, ACCENT_OPTIONS } from '../utils/accent'
 import { getBackground, setBackground, BACKGROUND_OPTIONS, getInkPreference, setInkPreference, InkPreference } from '../utils/background'
 import { setSavedVoice } from '../utils/tts-prefs'
 import { getTextScale, setTextScale, MIN_SCALE, MAX_SCALE } from '../utils/text-size'
+import { getAutoAwayEnabled, setAutoAwayEnabled, getAutoAwayMinutes, setAutoAwayMinutes } from '../utils/auto-away'
 import { getAutoReconnect, setAutoReconnect } from '../utils/connection-settings'
 import { getSpeechEngineSetting, setSpeechEngineSetting, SpeechEngineKind } from '../services/speech-engine'
 
@@ -48,6 +49,8 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
   const [appVersion, setAppVersion] = useState<string>('')
   const [updateMsg, setUpdateMsg] = useState<string>('')
   const [checking, setChecking] = useState(false)
+  const [autoAway, setAutoAwayState] = useState(getAutoAwayEnabled)
+  const [autoAwayMin, setAutoAwayMinState] = useState(getAutoAwayMinutes)
   const [autoReconnect, setAutoReconnectState] = useState(getAutoReconnect)
   const [speechEngine, setSpeechEngineState] = useState<SpeechEngineKind>(getSpeechEngineSetting)
   const [diagnostics, setDiagnostics] = useState<{
@@ -249,6 +252,48 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
           <div className="tts-info" style={{ paddingLeft: 44, paddingTop: 0, marginTop: -4 }}>
             When off, the app will not reconnect after disconnect or auth failure (connector only).
           </div>
+
+          <div className="setting-item">
+            <span className="setting-icon" aria-hidden="true">💤</span>
+            <span>Auto-away when idle</span>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={autoAway}
+                onChange={(e) => {
+                  const v = e.target.checked
+                  setAutoAwayState(v)
+                  setAutoAwayEnabled(v)
+                }}
+                aria-label="Auto-away when idle"
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+          {autoAway && (
+            <div className="tts-settings-panel" style={{ paddingTop: 8 }}>
+              <div className="tts-setting-row">
+                <label htmlFor="auto-away-min">Go Away after</label>
+                <select
+                  id="auto-away-min"
+                  value={autoAwayMin}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10)
+                    setAutoAwayMinState(v)
+                    setAutoAwayMinutes(v)
+                  }}
+                  aria-label="Minutes idle before auto-away"
+                >
+                  <option value={1}>1 minute</option>
+                  <option value={3}>3 minutes</option>
+                  <option value={5}>5 minutes</option>
+                  <option value={10}>10 minutes</option>
+                  <option value={15}>15 minutes</option>
+                  <option value={30}>30 minutes</option>
+                </select>
+              </div>
+            </div>
+          )}
 
           <button className="setting-item" onClick={handleOpenDevTools} aria-label="Open debug console">
             <span className="setting-icon" aria-hidden="true">🔧</span>

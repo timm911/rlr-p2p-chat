@@ -7,6 +7,9 @@ import { getSpeechEngine } from '../services/speech-engine'
 import { isEchoOfRecentTTS, recordSpokenText } from '../utils/echo-guard'
 import { toSpokenText } from '../utils/linkify'
 import { resolveInitialVoice, getSavedVoice, setSavedVoice } from '../utils/tts-prefs'
+import { dayLabel, isNewDay } from '../utils/date-format'
+import { getAutoAwayEnabled, getAutoAwayMinutes } from '../utils/auto-away'
+import { getVoiceRecorder } from '../services/voice-recorder'
 import { getSilenceTimeoutMs, getNoSpeechTimeoutMs } from '../utils/voice-timeouts'
 import './ChatWindow.css'
 
@@ -60,6 +63,12 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
     try { return (localStorage.getItem('rlrchat-peer-status') as Status) || 'Talk to me' } catch { return 'Talk to me' }
   })
   const [isConnected, setIsConnected] = useState(true)
+  const [showSearch, setShowSearch] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false)
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false)
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [isListening, setIsListening] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
@@ -93,6 +102,10 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const wasDisconnectedRef = useRef<boolean>(false)
   const handleMicClickRef = useRef<() => void>(() => {})
+  // Auto-away bookkeeping
+  const autoAwayActiveRef = useRef<boolean>(false)
+  const statusBeforeAwayRef = useRef<Status>('Talk to me')
+  const handleStatusChangeRef = useRef<(s: Status, opts?: { auto?: boolean }) => void>(() => {})
   // Texts recently played by TTS, kept for echo detection (mic hearing speakers)
   const recentTTSTextsRef = useRef<Array<{ text: string; time: number }>>([])
   // Show the "no microphone" guidance only once instead of per-message spam
@@ -172,6 +185,42 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
   useEffect(() => {
     isListeningRef.current = isListening
   }, [isListening])
+
+  // Keep a live ref to handleStatusChange for the auto-away timer
+  useEffect(() => {
+    handleStatusChangeRef.current = handleStatusChange
+  })
+
+  // Auto-away: after N minutes idle, flip an active status to Away; restore on
+  // the next interaction. Only triggers from "Talk to me"/"Listen only" so an
+  // intentional status (Bed, Dinner, …) is never overridden.
+  useEffect(() => {
+    let lastActivity = Date.now()
+    const onActivity = () => {
+      lastActivity = Date.now()
+      if (autoAwayActiveRef.current) {
+        autoAwayActiveRef.current = false
+        handleStatusChangeRef.current(statusBeforeAwayRef.current)
+      }
+    }
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'wheel']
+    events.forEach((e) => window.addEventListener(e, onActivity, { passive: true }))
+    const timer = setInterval(() => {
+      if (!getAutoAwayEnabled()) return
+      const idleMs = Date.now() - lastActivity
+      const limit = getAutoAwayMinutes() * 60 * 1000
+      const cur = myStatusRef.current
+      if (!autoAwayActiveRef.current && idleMs >= limit && (cur === 'Talk to me' || cur === 'Listen only')) {
+        statusBeforeAwayRef.current = cur
+        autoAwayActiveRef.current = true
+        handleStatusChangeRef.current('Away', { auto: true })
+      }
+    }, 15000)
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, onActivity))
+      clearInterval(timer)
+    }
+  }, [])
 
   // Apply the TTS voice on launch: the saved pick, or this identity's default
   // (RLRJupiter → Joe, Ripster → Alan). Persist it the first time so it sticks.
@@ -510,10 +559,15 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
         const name = String(msg.payload.fileName || '')
         const type = String(msg.payload.fileType || '')
         const isImage = /\.(jpe?g|png|gif|bmp|webp)$/i.test(name) || /(jpe?g|png|gif|bmp|webp)/i.test(type)
+        const isAudio = /\.(webm|ogg|oga|mp3|m4a|wav)$/i.test(name) || /audio|webm/i.test(type)
         if (isImage) {
           void acceptOffer(msg.payload, true)
           // Announce instead of reading the file name aloud
           void announceViaVoice('Picture received', myStatusRef.current)
+        } else if (isAudio) {
+          // Voice messages: auto-accept and play inline (no save dialog)
+          void acceptOffer(msg.payload, true)
+          void announceViaVoice('Voice message received', myStatusRef.current)
         } else {
           setFileOfferDialog(msg.payload)
         }
@@ -682,7 +736,9 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
     await sendChatMessage(inputText, { source: 'text' })
   }
 
-  const handleStatusChange = async (newStatus: Status) => {
+  const handleStatusChange = async (newStatus: Status, opts?: { auto?: boolean }) => {
+    // A deliberate (manual) status change cancels any pending auto-away restore
+    if (!opts?.auto) autoAwayActiveRef.current = false
     setMyStatus(newStatus)
     addSystemMessage(`You changed status to ${newStatus}`)
 
@@ -1285,6 +1341,56 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
     }
   }
 
+  // --- Voice messages (record audio, send as a file) ---
+  const startVoiceMessage = async () => {
+    if (!isConnected) return
+    try {
+      // Don't run STT and recording at once
+      if (isListening) { await getSpeechEngine().stop() }
+      await getVoiceRecorder().start()
+      setIsRecordingVoice(true)
+      setRecordingSeconds(0)
+      soundService.play('ptt-start')
+      recordingTimerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000)
+    } catch (error) {
+      console.error('[VoiceMsg] Failed to start recording:', error)
+      addSystemMessage('Could not start recording. Check your microphone.')
+      setIsRecordingVoice(false)
+    }
+  }
+
+  const stopRecordingTimer = () => {
+    if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null }
+  }
+
+  const sendVoiceMessage = async () => {
+    stopRecordingTimer()
+    setIsRecordingVoice(false)
+    soundService.play('ptt-stop')
+    try {
+      const rec = await getVoiceRecorder().stop()
+      if (!rec || rec.durationMs < 400) {
+        addSystemMessage('Recording too short.')
+        return
+      }
+      const saved = await window.electronAPI.saveTempAudio(rec.bytes, rec.ext)
+      if (!saved.success || !saved.filePath) {
+        addSystemMessage('Failed to save voice message.')
+        return
+      }
+      await handleFileSend(saved.filePath)
+    } catch (error) {
+      console.error('[VoiceMsg] Failed to send:', error)
+      addSystemMessage('Failed to send voice message.')
+    }
+  }
+
+  const cancelVoiceMessage = () => {
+    stopRecordingTimer()
+    setIsRecordingVoice(false)
+    getVoiceRecorder().cancel()
+  }
+
   const handleFileAccepted = async (transferId: string) => {
     // File chunk sending is handled automatically by the main process
     // We just need to update the UI status to show it's in progress
@@ -1479,6 +1585,16 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
           <StatusDropdown currentStatus={myStatus} onStatusChange={handleStatusChange} />
 
           <button
+            className={`icon-btn ${showSearch ? 'active' : ''}`}
+            onClick={() => { setShowSearch(s => !s); if (showSearch) setSearchQuery('') }}
+            title="Search messages"
+            aria-label="Search messages"
+            aria-pressed={showSearch}
+          >
+            🔍
+          </button>
+
+          <button
             className={`icon-btn ${isMuted ? 'muted' : ''}`}
             onClick={toggleMute}
             title={isMuted ? 'Unmute (speech & sounds off)' : 'Mute speech & sounds'}
@@ -1498,6 +1614,25 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
           </button>
         </div>
       </div>
+
+      {showSearch && (
+        <div className="search-bar no-drag">
+          <span aria-hidden="true">🔍</span>
+          <input
+            autoFocus
+            type="text"
+            className="search-input"
+            placeholder="Search messages…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') { setShowSearch(false); setSearchQuery('') } }}
+            aria-label="Search messages"
+          />
+          {searchQuery && (
+            <button className="search-clear" onClick={() => setSearchQuery('')} aria-label="Clear search">×</button>
+          )}
+        </div>
+      )}
 
       <details className="connection-log-wrap no-drag">
         <summary>Connection log</summary>
@@ -1566,6 +1701,11 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
         onDragLeave={handleFileDragLeave}
         onDragOver={handleFileDragOver}
         onDrop={handleFileDrop}
+        onScroll={(e) => {
+          const el = e.currentTarget
+          const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+          setShowJumpToBottom(!nearBottom)
+        }}
         role="log"
         aria-label="Chat messages"
       >
@@ -1576,26 +1716,68 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
             </div>
           </div>
         )}
-        {messages.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-state-icon">💬</div>
-            <div className="empty-state-title">No messages yet</div>
-            <div className="empty-state-subtitle">
-              Send a message to {peerName} to start the conversation
-            </div>
-          </div>
-        ) : (
-          messages.map(msg => (
-            <MessageBubble
-              key={msg.id}
-              message={msg}
-              isOwn={msg.from === userIdentity}
-              onAddReaction={handleAddReaction}
-              onRemoveReaction={handleRemoveReaction}
-            />
-          ))
-        )}
+        {(() => {
+          const q = searchQuery.trim().toLowerCase()
+          const visible = q
+            ? messages.filter(m => (m.content || '').toLowerCase().includes(q) || (m.fileTransfer?.fileName || '').toLowerCase().includes(q))
+            : messages
+
+          if (messages.length === 0) {
+            return (
+              <div className="empty-state">
+                <div className="empty-state-icon">💬</div>
+                <div className="empty-state-title">No messages yet</div>
+                <div className="empty-state-subtitle">
+                  Send a message to {peerName} to start the conversation
+                </div>
+              </div>
+            )
+          }
+          if (q && visible.length === 0) {
+            return (
+              <div className="empty-state">
+                <div className="empty-state-icon">🔍</div>
+                <div className="empty-state-title">No matches</div>
+                <div className="empty-state-subtitle">Nothing found for “{searchQuery}”</div>
+              </div>
+            )
+          }
+
+          // Interleave day dividers between messages from different calendar days
+          let prevTs: number | null = null
+          const nodes: JSX.Element[] = []
+          for (const msg of visible) {
+            if (isNewDay(prevTs, msg.timestamp)) {
+              nodes.push(
+                <div className="day-divider" key={`divider-${msg.id}`}>
+                  <span>{dayLabel(msg.timestamp)}</span>
+                </div>
+              )
+            }
+            prevTs = msg.timestamp
+            nodes.push(
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                isOwn={msg.from === userIdentity}
+                onAddReaction={handleAddReaction}
+                onRemoveReaction={handleRemoveReaction}
+              />
+            )
+          }
+          return nodes
+        })()}
         <div ref={messagesEndRef} />
+        {showJumpToBottom && (
+          <button
+            className="jump-to-bottom no-drag"
+            onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })}
+            aria-label="Jump to newest messages"
+            title="Jump to newest"
+          >
+            ↓
+          </button>
+        )}
       </div>
 
       {/* Input area - supports drag-drop for files */}
@@ -1633,7 +1815,15 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
             </button>
           </div>
         )}
-        <div className="input-wrapper">
+        {isRecordingVoice && (
+          <div className="voice-record-bar">
+            <span className="rec-dot" aria-hidden="true" />
+            <span className="rec-label">Recording… {Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, '0')}</span>
+            <button type="button" className="glass-button rec-cancel" onClick={cancelVoiceMessage} aria-label="Cancel voice message">Cancel</button>
+            <button type="button" className="glass-button rec-send" onClick={sendVoiceMessage} aria-label="Send voice message">Send ➤</button>
+          </div>
+        )}
+        <div className="input-wrapper" style={isRecordingVoice ? { display: 'none' } : undefined}>
           <textarea
             ref={inputRef}
             className="input-field"
@@ -1675,6 +1865,15 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
               aria-label={isListening ? "Stop listening" : "Start voice input"}
             >
               🎤
+            </button>
+            <button
+              className="tool-btn"
+              title="Record a voice message"
+              onClick={startVoiceMessage}
+              disabled={!isConnected}
+              aria-label="Record a voice message"
+            >
+              🎙️
             </button>
             <button
               className="tool-btn send-btn"

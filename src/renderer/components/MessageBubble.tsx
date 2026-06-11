@@ -8,6 +8,12 @@ function isImageFile(fileType: string): boolean {
   return IMAGE_EXTENSIONS.some(ext => fileType.toLowerCase().endsWith(ext) || fileType.toLowerCase() === ext.slice(1))
 }
 
+const AUDIO_EXTENSIONS = ['.webm', '.ogg', '.oga', '.mp3', '.m4a', '.wav']
+function isAudioFile(fileType: string): boolean {
+  const t = (fileType || '').toLowerCase()
+  return AUDIO_EXTENSIONS.some(ext => t.endsWith(ext) || t === ext.slice(1)) || t.includes('audio')
+}
+
 interface Props {
   message: Message
   isOwn: boolean
@@ -20,17 +26,23 @@ const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '🔥']
 function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction }: Props) {
   const [showReactionPicker, setShowReactionPicker] = useState(false)
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null)
+  const [audioDataUrl, setAudioDataUrl] = useState<string | null>(null)
 
   useEffect(() => {
     if (message.type !== 'file' || !message.fileTransfer) return
     const ft = message.fileTransfer
-    if (ft.status !== 'completed' || !ft.filePath || !isImageFile(ft.fileType)) return
+    if (ft.status !== 'completed' || !ft.filePath) return
+    const image = isImageFile(ft.fileType) || isImageFile(ft.fileName)
+    const audio = isAudioFile(ft.fileType) || isAudioFile(ft.fileName)
+    if (!image && !audio) return
     let cancelled = false
     window.electronAPI.getFileDataUrl(ft.filePath).then((r: { success?: boolean; dataUrl?: string }) => {
-      if (!cancelled && r.success && r.dataUrl) setImageDataUrl(r.dataUrl)
+      if (cancelled || !r.success || !r.dataUrl) return
+      if (image) setImageDataUrl(r.dataUrl)
+      else setAudioDataUrl(r.dataUrl)
     })
     return () => { cancelled = true }
-  }, [message.type, message.fileTransfer?.status, message.fileTransfer?.filePath, message.fileTransfer?.fileType])
+  }, [message.type, message.fileTransfer?.status, message.fileTransfer?.filePath, message.fileTransfer?.fileType, message.fileTransfer?.fileName])
 
   const formatTime = (timestamp: number) => {
     const date = new Date(timestamp)
@@ -93,9 +105,9 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction }: Prop
         <div className="message-bubble file-message">
           <div className="file-transfer-card">
             <div className="file-header">
-              <div className="file-icon-large">{getFileIcon(fileTransfer.fileType)}</div>
+              <div className="file-icon-large">{(isAudioFile(fileTransfer.fileType) || isAudioFile(fileTransfer.fileName)) ? '🎙️' : getFileIcon(fileTransfer.fileType)}</div>
               <div className="file-details">
-                <div className="file-name">{fileTransfer.fileName}</div>
+                <div className="file-name">{(isAudioFile(fileTransfer.fileType) || isAudioFile(fileTransfer.fileName)) ? 'Voice message' : fileTransfer.fileName}</div>
                 <div className="file-size">{formatBytes(fileTransfer.fileSize)}</div>
               </div>
             </div>
@@ -148,9 +160,16 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction }: Prop
                     </a>
                   </div>
                 )}
-                <div className="file-status completed">
-                  ✓ Transfer complete
-                </div>
+                {audioDataUrl && (
+                  <div className="file-inline-audio">
+                    <audio controls preload="metadata" src={audioDataUrl} />
+                  </div>
+                )}
+                {!audioDataUrl && (
+                  <div className="file-status completed">
+                    ✓ Transfer complete
+                  </div>
+                )}
               </>
             )}
 

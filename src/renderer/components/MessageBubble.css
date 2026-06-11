@@ -387,3 +387,13 @@
   margin-left: 8px;
   opacity: 0.9;
 }
+
+/* Inline voice-message audio player */
+.file-inline-audio {
+  margin-top: 8px;
+}
+.file-inline-audio audio {
+  width: 240px;
+  max-width: 100%;
+  height: 36px;
+}

@@ -114,6 +114,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // File transfer
   saveClipboardImage: () => ipcRenderer.invoke('file:save-clipboard-image'),
+  saveTempAudio: (bytes: Uint8Array, ext?: string) => ipcRenderer.invoke('file:save-temp-audio', bytes, ext),
   readClipboardText: () => ipcRenderer.invoke('clipboard:read-text'),
   secureEncrypt: (text: string) => ipcRenderer.invoke('secure:encrypt', text),
   secureDecrypt: (b64: string) => ipcRenderer.invoke('secure:decrypt', b64),
@@ -240,11 +241,12 @@ export interface ElectronAPI {
   onSpeechResult: (callback: (result: { text: string; confidence: number; isFinal: boolean }) => void) => () => void
   onSpeechError: (callback: (error: string) => void) => () => void
   saveClipboardImage: () => Promise<{ success: boolean; filePath?: string; error?: string }>
+  saveTempAudio: (bytes: Uint8Array, ext?: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
   readClipboardText: () => Promise<string>
   secureEncrypt: (text: string) => Promise<string | null>
   secureDecrypt: (b64: string) => Promise<string | null>
   onContextPasteImage: (callback: () => void) => () => void
-  getFileDataUrl: (filePath: string) => Promise<{ success: boolean; dataUrl?: string; error?: string }>
+  getFileDataUrl: (filePath: string) => Promise<{ success: boolean; dataUrl?: string; kind?: 'audio' | 'image'; error?: string }>
   pickFile: () => Promise<{ success: boolean; filePath?: string; cancelled?: boolean; error?: string }>
   sendFile: (filePath: string) => Promise<{ success: boolean; transferId?: string; error?: string }>
   acceptFileTransfer: (offer: any) => Promise<{ success: boolean; transferId?: string; cancelled?: boolean; error?: string }>

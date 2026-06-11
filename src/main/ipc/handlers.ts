@@ -464,20 +464,39 @@ export function setupIPCHandlers(window: BrowserWindow): void {
 
   // File transfer handlers
 
-  // Read a file and return as data URL (for inline image preview in renderer). Main-only paths.
+  // Read a file and return as data URL (inline image OR audio preview). Main-only paths.
   ipcMain.handle('file:get-file-data-url', async (_event, filePath: string) => {
     try {
       const ext = path.extname(filePath).toLowerCase()
-      const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
-      if (!imageExts.includes(ext)) {
-        return { success: false, error: 'Not an image' }
+      const imageMimes: Record<string, string> = {
+        '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp'
+      }
+      const audioMimes: Record<string, string> = {
+        '.webm': 'audio/webm', '.ogg': 'audio/ogg', '.oga': 'audio/ogg',
+        '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.wav': 'audio/wav'
+      }
+      const mime = imageMimes[ext] || audioMimes[ext]
+      if (!mime) {
+        return { success: false, error: 'Not an inline-previewable file' }
       }
       const buf = fs.readFileSync(filePath)
-      const base64 = buf.toString('base64')
-      const mime = ext === '.png' ? 'image/png' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.gif' ? 'image/gif' : ext === '.webp' ? 'image/webp' : 'image/bmp'
-      return { success: true, dataUrl: `data:${mime};base64,${base64}` }
+      return { success: true, dataUrl: `data:${mime};base64,${buf.toString('base64')}`, kind: audioMimes[ext] ? 'audio' : 'image' }
     } catch (err: any) {
       return { success: false, error: err?.message || 'Failed to read file' }
+    }
+  })
+
+  // Write a recorded voice-message blob to a temp file, then it's sent via the
+  // normal file-transfer path (file:send-file).
+  ipcMain.handle('file:save-temp-audio', async (_event, bytes: Uint8Array, ext: string = 'webm') => {
+    try {
+      const safeExt = /^[a-z0-9]{1,5}$/i.test(ext) ? ext : 'webm'
+      const filePath = path.join(os.tmpdir(), `rlrchat-voice-${Date.now()}.${safeExt}`)
+      fs.writeFileSync(filePath, Buffer.from(bytes))
+      return { success: true, filePath }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to save audio' }
     }
   })
 
