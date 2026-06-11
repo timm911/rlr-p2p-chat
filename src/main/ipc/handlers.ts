@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, dialog, shell, clipboard, app } from 'electron'
+import { ipcMain, BrowserWindow, dialog, shell, clipboard, app, safeStorage } from 'electron'
 import os from 'os'
 import path from 'path'
 import fs from 'fs'
@@ -257,14 +257,26 @@ export function setupIPCHandlers(window: BrowserWindow): void {
   })
 
   // Message history persistence (%USERPROFILE%\AppData\Roaming\<app>\history.json)
+  // Encrypted at rest with the OS keystore (Windows DPAPI) via safeStorage,
+  // so the chat content on disk isn't readable as plain text. Files written by
+  // older versions (plain JSON) are still read and get re-encrypted on save.
   const getHistoryPath = () => path.join(app.getPath('userData'), 'history.json')
+  const ENC_MAGIC = 'RLRENC1:' // prefix marking a safeStorage-encrypted file
 
   ipcMain.handle('history:load', async () => {
     try {
       const p = getHistoryPath()
       if (!fs.existsSync(p)) return []
-      const raw = fs.readFileSync(p, 'utf8')
-      const data = JSON.parse(raw)
+      const buf = fs.readFileSync(p)
+      let json: string
+      if (buf.length >= ENC_MAGIC.length && buf.subarray(0, ENC_MAGIC.length).toString('utf8') === ENC_MAGIC) {
+        // Encrypted payload
+        json = safeStorage.decryptString(buf.subarray(ENC_MAGIC.length))
+      } else {
+        // Legacy plaintext JSON (migrated to encrypted on next save)
+        json = buf.toString('utf8')
+      }
+      const data = JSON.parse(json)
       return Array.isArray(data) ? data : []
     } catch (err) {
       console.error('Failed to load history:', err)
@@ -285,7 +297,14 @@ export function setupIPCHandlers(window: BrowserWindow): void {
         }
         return rest
       })
-      fs.writeFileSync(p, JSON.stringify(toSave), 'utf8')
+      const json = JSON.stringify(toSave)
+      if (safeStorage.isEncryptionAvailable()) {
+        const enc = safeStorage.encryptString(json)
+        fs.writeFileSync(p, Buffer.concat([Buffer.from(ENC_MAGIC, 'utf8'), enc]))
+      } else {
+        // No OS keystore (rare) — fall back to plaintext so chat still saves
+        fs.writeFileSync(p, json, 'utf8')
+      }
       return { success: true }
     } catch (err: any) {
       console.error('Failed to save history:', err)
@@ -459,6 +478,26 @@ export function setupIPCHandlers(window: BrowserWindow): void {
       return { success: true, dataUrl: `data:${mime};base64,${base64}` }
     } catch (err: any) {
       return { success: false, error: err?.message || 'Failed to read file' }
+    }
+  })
+
+  // OS-keystore encryption (Windows DPAPI) for the renderer to protect small
+  // secrets at rest, e.g. the saved session password.
+  ipcMain.handle('secure:encrypt', async (_event, text: string) => {
+    try {
+      if (!safeStorage.isEncryptionAvailable() || typeof text !== 'string') return null
+      return safeStorage.encryptString(text).toString('base64')
+    } catch (_) {
+      return null
+    }
+  })
+
+  ipcMain.handle('secure:decrypt', async (_event, b64: string) => {
+    try {
+      if (!safeStorage.isEncryptionAvailable() || typeof b64 !== 'string') return null
+      return safeStorage.decryptString(Buffer.from(b64, 'base64'))
+    } catch (_) {
+      return null
     }
   })
 

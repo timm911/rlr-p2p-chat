@@ -7,6 +7,7 @@ import { getDensity, setDensity } from '../utils/density'
 import { getAccent, setAccent, ACCENT_OPTIONS } from '../utils/accent'
 import { getBackground, setBackground, BACKGROUND_OPTIONS, getInkPreference, setInkPreference, InkPreference } from '../utils/background'
 import { setSavedVoice } from '../utils/tts-prefs'
+import { getTextScale, setTextScale, MIN_SCALE, MAX_SCALE } from '../utils/text-size'
 import { getAutoReconnect, setAutoReconnect } from '../utils/connection-settings'
 import { getSpeechEngineSetting, setSpeechEngineSetting, SpeechEngineKind } from '../services/speech-engine'
 
@@ -43,6 +44,7 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
   const [accent, setAccentState] = useState(getAccent)
   const [background, setBackgroundState] = useState(getBackground)
   const [inkPref, setInkPrefState] = useState<InkPreference>(getInkPreference)
+  const [textScale, setTextScaleState] = useState<number>(getTextScale)
   const [autoReconnect, setAutoReconnectState] = useState(getAutoReconnect)
   const [speechEngine, setSpeechEngineState] = useState<SpeechEngineKind>(getSpeechEngineSetting)
   const [diagnostics, setDiagnostics] = useState<{
@@ -552,6 +554,28 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
               <option value="comfortable">Comfortable</option>
               <option value="compact">Compact</option>
             </select>
+          </div>
+
+          <div className="setting-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span className="setting-icon" aria-hidden="true">🔠</span>
+              <span>Text size</span>
+              <span style={{ marginLeft: 'auto', fontSize: 12, opacity: 0.7 }}>{Math.round(textScale * 100)}%</span>
+            </div>
+            <input
+              type="range"
+              min={MIN_SCALE}
+              max={MAX_SCALE}
+              step={0.05}
+              value={textScale}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value)
+                setTextScaleState(v)
+                setTextScale(v) // applies live
+              }}
+              aria-label="Text size"
+              style={{ width: '100%', marginTop: 8, cursor: 'pointer' }}
+            />
           </div>
 
           <div className="setting-item">

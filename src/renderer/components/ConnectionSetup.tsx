@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { getSavedConnection, saveConnection } from '../utils/connection-settings'
+import { getSavedConnectionMeta, getSavedPassword, saveConnection } from '../utils/connection-settings'
 import './ConnectionSetup.css'
 
 interface Props {
@@ -9,12 +9,13 @@ interface Props {
   autoConnect?: boolean
 }
 
-const savedConnection = getSavedConnection()
+const savedConnection = getSavedConnectionMeta()
 
 function ConnectionSetup({ userIdentity, initialConfig, onConnect, autoConnect }: Props) {
   const [host, setHost] = useState(savedConnection?.host ?? initialConfig.host)
   const [port, setPort] = useState((savedConnection?.port ?? initialConfig.port).toString())
-  const [password, setPassword] = useState(savedConnection?.password ?? '')
+  const [password, setPassword] = useState('')
+  const [passwordLoaded, setPasswordLoaded] = useState(!savedConnection?.hasPassword)
   const [localIPs, setLocalIPs] = useState<{ name: string; address: string }[]>([])
   const [isConnecting, setIsConnecting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string>('')
@@ -29,6 +30,15 @@ function ConnectionSetup({ userIdentity, initialConfig, onConnect, autoConnect }
       setConnectionLog((prev) => [...prev.slice(-19), entry])
     })
     return off
+  }, [])
+
+  // Load the saved (encrypted) password on mount and prefill it
+  useEffect(() => {
+    if (!savedConnection?.hasPassword) return
+    getSavedPassword().then((pw) => {
+      if (pw) setPassword(pw)
+      setPasswordLoaded(true)
+    })
   }, [])
 
   useEffect(() => {
@@ -141,11 +151,11 @@ function ConnectionSetup({ userIdentity, initialConfig, onConnect, autoConnect }
   const autoConnectFiredRef = useRef(false)
   useEffect(() => {
     if (!autoConnect || autoConnectFiredRef.current) return
-    if (!savedConnection?.password) return
+    if (!passwordLoaded || !password) return // wait until the saved password is decrypted
     autoConnectFiredRef.current = true
     void handleConnect()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoConnect])
+  }, [autoConnect, passwordLoaded, password])
 
   return (
     <div className="connection-setup glass">

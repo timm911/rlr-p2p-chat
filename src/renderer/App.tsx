@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import UserSelection from './components/UserSelection'
 import ConnectionSetup from './components/ConnectionSetup'
 import ChatWindow from './components/ChatWindow'
-import { getSavedConnection, getSavedIdentity, saveIdentity } from './utils/connection-settings'
+import { getSavedConnectionMeta, getSavedIdentity, saveIdentity } from './utils/connection-settings'
 import './styles/App.css'
 
 type Screen = 'user-selection' | 'connection-setup' | 'chat'
@@ -17,8 +17,8 @@ export interface ConnectionConfig {
 // (host/port/password), skip straight to connecting on launch. This is what
 // makes the app reconnect by itself after an auto-update restart.
 const savedIdentity = getSavedIdentity()
-const savedConn = getSavedConnection()
-const canAutoResume = !!savedIdentity && !!savedConn && !!savedConn.password &&
+const savedConn = getSavedConnectionMeta()
+const canAutoResume = !!savedIdentity && !!savedConn && savedConn.hasPassword &&
   (savedIdentity === 'Ripster' || !!savedConn.host)
 
 function App() {

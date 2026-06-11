@@ -113,6 +113,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // File transfer
   saveClipboardImage: () => ipcRenderer.invoke('file:save-clipboard-image'),
   readClipboardText: () => ipcRenderer.invoke('clipboard:read-text'),
+  secureEncrypt: (text: string) => ipcRenderer.invoke('secure:encrypt', text),
+  secureDecrypt: (b64: string) => ipcRenderer.invoke('secure:decrypt', b64),
   onContextPasteImage: (callback: () => void) => {
     const handler = () => callback()
     ipcRenderer.on('context-menu:paste-image', handler)
@@ -235,6 +237,8 @@ export interface ElectronAPI {
   onSpeechError: (callback: (error: string) => void) => () => void
   saveClipboardImage: () => Promise<{ success: boolean; filePath?: string; error?: string }>
   readClipboardText: () => Promise<string>
+  secureEncrypt: (text: string) => Promise<string | null>
+  secureDecrypt: (b64: string) => Promise<string | null>
   onContextPasteImage: (callback: () => void) => () => void
   getFileDataUrl: (filePath: string) => Promise<{ success: boolean; dataUrl?: string; error?: string }>
   pickFile: () => Promise<{ success: boolean; filePath?: string; cancelled?: boolean; error?: string }>

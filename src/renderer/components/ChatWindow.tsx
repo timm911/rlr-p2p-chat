@@ -51,8 +51,14 @@ export type Status = 'Talk to me' | 'Listen only' | 'BRB' | 'Bed' | 'Dinner' | '
 function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputText, setInputText] = useState('')
-  const [myStatus, setMyStatus] = useState<Status>('Talk to me')
-  const [peerStatus, setPeerStatus] = useState<Status>('Talk to me')
+  // Persist statuses so they survive a restart/auto-update (otherwise my own
+  // status reset to the default and the header showed the wrong peer status).
+  const [myStatus, setMyStatus] = useState<Status>(() => {
+    try { return (localStorage.getItem('rlrchat-my-status') as Status) || 'Talk to me' } catch { return 'Talk to me' }
+  })
+  const [peerStatus, setPeerStatus] = useState<Status>(() => {
+    try { return (localStorage.getItem('rlrchat-peer-status') as Status) || 'Talk to me' } catch { return 'Talk to me' }
+  })
   const [isConnected, setIsConnected] = useState(true)
   const [showSettings, setShowSettings] = useState(false)
   const [isListening, setIsListening] = useState(false)
@@ -154,7 +160,13 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
   // Update status ref when status changes
   useEffect(() => {
     myStatusRef.current = myStatus
+    try { localStorage.setItem('rlrchat-my-status', myStatus) } catch {}
   }, [myStatus])
+
+  // Remember the peer's last-known status across restarts
+  useEffect(() => {
+    try { localStorage.setItem('rlrchat-peer-status', peerStatus) } catch {}
+  }, [peerStatus])
 
   // Keep a ref of listening state for synchronous guards in async handlers
   useEffect(() => {
@@ -447,8 +459,15 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
           console.log('[TTS] Status does not use TTS, current:', currentStatus)
         }
       } else if (msg.type === 'status') {
-        setPeerStatus(msg.payload.status)
-        addSystemMessage(`${peerName} changed status to ${msg.payload.status}`)
+        // Only announce a genuine change. On reconnect each side re-broadcasts
+        // its current status to re-sync; if it's unchanged, stay quiet so we
+        // don't spam duplicate "changed status to X" lines.
+        setPeerStatus(prev => {
+          if (prev !== msg.payload.status) {
+            addSystemMessage(`${peerName} changed status to ${msg.payload.status}`)
+          }
+          return msg.payload.status
+        })
       } else if (msg.type === 'reaction') {
         // Handle incoming reaction from peer (add)
         setMessages(prev => prev.map(message => {
@@ -521,6 +540,13 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
           wasDisconnectedRef.current = false
         }
         setIsConnected(true)
+        // Re-broadcast my current status so the peer re-syncs after either
+        // side restarts/reconnects (fixes stale status in the header).
+        void window.electronAPI.sendMessage({
+          type: 'status',
+          payload: { status: myStatusRef.current },
+          timestamp: Date.now()
+        })
       } else if (state === 'disconnected') {
         wasDisconnectedRef.current = true
         setIsConnected(false)

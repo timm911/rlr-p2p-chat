@@ -26,7 +26,8 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      spellcheck: true // red-underline misspellings; suggestions in right-click menu
     }
   })
 
@@ -72,6 +73,24 @@ function createWindow(): void {
     const hasImage = !clipboard.readImage().isEmpty()
     const hasSelection = !!selectionText && selectionText.trim().length > 0
     const template: Electron.MenuItemConstructorOptions[] = []
+
+    // Spelling suggestions for a misspelled word go at the top
+    if (params.misspelledWord) {
+      for (const suggestion of params.dictionarySuggestions.slice(0, 5)) {
+        template.push({
+          label: suggestion,
+          click: () => mainWindow?.webContents.replaceMisspelling(suggestion)
+        })
+      }
+      if (params.dictionarySuggestions.length === 0) {
+        template.push({ label: 'No suggestions', enabled: false })
+      }
+      template.push({
+        label: 'Add to dictionary',
+        click: () => mainWindow?.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord)
+      })
+      template.push({ type: 'separator' })
+    }
 
     if (isEditable) template.push({ role: 'cut', enabled: editFlags.canCut, label: 'Cut' })
     if (hasSelection || isEditable) template.push({ role: 'copy', enabled: editFlags.canCopy, label: 'Copy' })

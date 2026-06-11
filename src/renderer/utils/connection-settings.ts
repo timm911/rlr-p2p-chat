@@ -16,32 +16,67 @@ export function setAutoReconnect(enabled: boolean): void {
 }
 
 // Last-used connection settings, so neither user has to retype them each
-// launch. The session password is kept only on this machine (localStorage of
-// the local app profile) — it never leaves the device except as a scrypt-
-// derived key during the encrypted handshake.
+// launch. Host/port are stored readably (not secret); the session PASSWORD is
+// encrypted at rest with the OS keystore (Windows DPAPI via safeStorage) so it
+// isn't recoverable as plain text from disk.
 const LAST_CONNECTION_KEY = 'rlrchat-last-connection'
 
-export interface SavedConnection {
+export interface SavedConnectionMeta {
   host: string
   port: number
-  password: string
+  hasPassword: boolean
 }
 
-export function getSavedConnection(): SavedConnection | null {
+interface StoredConnection {
+  host: string
+  port: number
+  pwEnc?: string | null // safeStorage-encrypted (base64)
+  pw?: string | null // plaintext fallback when OS encryption unavailable / legacy
+  password?: string // legacy field (pre-encryption builds)
+}
+
+function readStored(): StoredConnection | null {
   try {
     const raw = localStorage.getItem(LAST_CONNECTION_KEY)
     if (!raw) return null
     const data = JSON.parse(raw)
-    if (typeof data.host === 'string' && typeof data.port === 'number' && typeof data.password === 'string') {
-      return data
-    }
+    if (typeof data.host === 'string' && typeof data.port === 'number') return data
   } catch (_) {}
   return null
 }
 
-export function saveConnection(settings: SavedConnection): void {
+/** Sync metadata for prefill + auto-resume gating (no password value). */
+export function getSavedConnectionMeta(): SavedConnectionMeta | null {
+  const s = readStored()
+  if (!s) return null
+  const hasPassword = !!(s.pwEnc || s.pw || s.password)
+  return { host: s.host, port: s.port, hasPassword }
+}
+
+/** Decrypt and return the saved password (async, needs the main process). */
+export async function getSavedPassword(): Promise<string | null> {
+  const s = readStored()
+  if (!s) return null
+  if (s.pwEnc) {
+    try {
+      const dec = await window.electronAPI.secureDecrypt(s.pwEnc)
+      if (dec != null) return dec
+    } catch (_) {}
+    return null
+  }
+  return s.pw ?? s.password ?? null
+}
+
+export async function saveConnection(settings: { host: string; port: number; password: string }): Promise<void> {
+  let pwEnc: string | null = null
   try {
-    localStorage.setItem(LAST_CONNECTION_KEY, JSON.stringify(settings))
+    pwEnc = await window.electronAPI.secureEncrypt(settings.password)
+  } catch (_) {}
+  const stored: StoredConnection = pwEnc
+    ? { host: settings.host, port: settings.port, pwEnc }
+    : { host: settings.host, port: settings.port, pw: settings.password } // OS keystore unavailable
+  try {
+    localStorage.setItem(LAST_CONNECTION_KEY, JSON.stringify(stored))
   } catch (_) {}
 }
 
