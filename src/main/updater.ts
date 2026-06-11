@@ -1,56 +1,72 @@
 /**
  * Auto-update via electron-updater (GitHub Releases feed).
  *
- * Flow: on launch (and every 6h) the app checks the public repo's latest
- * release. If a newer version exists it downloads it in the background, then
- * relaunches into the new version. User settings survive automatically — they
- * live in userData (localStorage, history, window-state), which the installer
- * never touches — and the app auto-reconnects on relaunch (see auto-resume in
- * the renderer).
+ * On launch (and every 6h) the app checks the public repo's latest release.
+ * A newer version downloads in the background (differential — only changed
+ * blocks, so updates are small even though the full installer is large), then
+ * the app relaunches into it. User settings survive (they live in userData,
+ * untouched by the installer) and the app auto-reconnects on relaunch.
  *
- * Renderer is kept informed via `update:status` events so it can show a small
- * "Updating…" notice before the restart.
+ * Status is pushed to the renderer via `update:status`, and the renderer can
+ * trigger a manual check (`update:check`) and read the current version
+ * (`update:get-version`) from the Settings "Software update" section.
  */
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import { autoUpdater } from 'electron-updater'
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000 // every 6 hours
 
+let mainWin: BrowserWindow | null = null
+
+function send(status: string, info?: any): void {
+  try {
+    mainWin?.webContents.send('update:status', { status, info })
+  } catch (_) {}
+}
+
 export function setupAutoUpdater(win: BrowserWindow): void {
-  // The updater only works in a packaged build with a real release feed.
+  mainWin = win
+
+  // Current version + manual check are available even in dev (dev just reports
+  // it can't update), so the Settings UI always works.
+  ipcMain.handle('update:get-version', async () => app.getVersion())
+  ipcMain.handle('update:check', async () => {
+    if (!app.isPackaged) {
+      send('dev')
+      return { ok: false, reason: 'dev' }
+    }
+    try {
+      send('checking')
+      const r = await autoUpdater.checkForUpdates()
+      return { ok: true, version: r?.updateInfo?.version }
+    } catch (err: any) {
+      send('error', { message: err?.message || String(err) })
+      return { ok: false, reason: err?.message }
+    }
+  })
+
   if (!app.isPackaged) {
-    console.log('[Updater] Skipped (not packaged)')
+    console.log('[Updater] Auto-check skipped (not packaged)')
     return
   }
 
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
 
-  const send = (status: string, info?: any) => {
-    try {
-      win.webContents.send('update:status', { status, info })
-    } catch (_) {}
-  }
-
-  autoUpdater.on('checking-for-update', () => send('checking'))
+  autoUpdater.on('checking-for-update', () => { console.log('[Updater] checking'); send('checking') })
   autoUpdater.on('update-available', (info) => {
-    console.log('[Updater] Update available:', info.version)
+    console.log('[Updater] available:', info.version)
     send('available', { version: info.version })
   })
-  autoUpdater.on('update-not-available', () => send('none'))
-  autoUpdater.on('download-progress', (p) => {
-    send('downloading', { percent: Math.round(p.percent) })
-  })
+  autoUpdater.on('update-not-available', () => { console.log('[Updater] up to date'); send('none') })
+  autoUpdater.on('download-progress', (p) => send('downloading', { percent: Math.round(p.percent) }))
   autoUpdater.on('error', (err) => {
-    console.error('[Updater] Error:', err?.message)
+    console.error('[Updater] error:', err?.message)
     send('error', { message: err?.message })
   })
   autoUpdater.on('update-downloaded', (info) => {
-    console.log('[Updater] Update downloaded:', info.version, '— restarting shortly')
+    console.log('[Updater] downloaded:', info.version, '— restarting shortly')
     send('downloaded', { version: info.version })
-    // Give the renderer a moment to show the "updating, restarting" notice,
-    // then relaunch into the new version. isSilent=true (no installer UI),
-    // isForceRunAfter=true (relaunch the app after install).
     setTimeout(() => {
       try {
         autoUpdater.quitAndInstall(true, true)
@@ -63,10 +79,10 @@ export function setupAutoUpdater(win: BrowserWindow): void {
   const check = () => {
     autoUpdater.checkForUpdates().catch((err) => {
       console.error('[Updater] check failed:', err?.message)
+      send('error', { message: err?.message })
     })
   }
 
-  // First check shortly after launch (let the window settle), then on interval
   setTimeout(check, 8000)
   setInterval(check, CHECK_INTERVAL_MS)
 }

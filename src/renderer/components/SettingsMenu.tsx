@@ -45,6 +45,9 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
   const [background, setBackgroundState] = useState(getBackground)
   const [inkPref, setInkPrefState] = useState<InkPreference>(getInkPreference)
   const [textScale, setTextScaleState] = useState<number>(getTextScale)
+  const [appVersion, setAppVersion] = useState<string>('')
+  const [updateMsg, setUpdateMsg] = useState<string>('')
+  const [checking, setChecking] = useState(false)
   const [autoReconnect, setAutoReconnectState] = useState(getAutoReconnect)
   const [speechEngine, setSpeechEngineState] = useState<SpeechEngineKind>(getSpeechEngineSetting)
   const [diagnostics, setDiagnostics] = useState<{
@@ -98,6 +101,31 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
     const newConfig = { ...ttsConfig, enabled }
     setTtsConfig(newConfig)
     await window.electronAPI.ttsConfigure({ enabled })
+  }
+
+  useEffect(() => {
+    window.electronAPI.updateGetVersion().then(setAppVersion).catch(() => {})
+    const off = window.electronAPI.onUpdateStatus(({ status, info }) => {
+      if (status === 'checking') setUpdateMsg('Checking for updates…')
+      else if (status === 'available') setUpdateMsg(`Update found (v${info?.version}) — downloading…`)
+      else if (status === 'downloading') setUpdateMsg(`Downloading… ${info?.percent ?? 0}%`)
+      else if (status === 'downloaded') { setUpdateMsg(`Update ready (v${info?.version}) — restarting…`); setChecking(false) }
+      else if (status === 'none') { setUpdateMsg("You're up to date."); setChecking(false) }
+      else if (status === 'dev') { setUpdateMsg('Updates only work in the installed app.'); setChecking(false) }
+      else if (status === 'error') { setUpdateMsg(`Update error: ${info?.message || 'unknown'}`); setChecking(false) }
+    })
+    return off
+  }, [])
+
+  const handleCheckForUpdates = async () => {
+    setChecking(true)
+    setUpdateMsg('Checking for updates…')
+    try {
+      await window.electronAPI.updateCheck()
+    } catch (e: any) {
+      setUpdateMsg(`Update error: ${e?.message || 'unknown'}`)
+      setChecking(false)
+    }
   }
 
   const handleVoiceChange = async (voice: string) => {
@@ -174,6 +202,28 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
         </div>
 
         <div className="settings-content">
+          <div className="setting-item" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span className="setting-icon" aria-hidden="true">⬆️</span>
+              <span>Software update</span>
+              <span style={{ marginLeft: 'auto', fontSize: 12, opacity: 0.7 }}>v{appVersion}</span>
+            </div>
+            <button
+              className="test-btn"
+              style={{ marginTop: 8 }}
+              onClick={handleCheckForUpdates}
+              disabled={checking}
+              aria-label="Check for updates"
+            >
+              {checking ? 'Checking…' : 'Check for updates'}
+            </button>
+            {updateMsg && (
+              <div className="tts-info" style={{ marginTop: 8 }}>{updateMsg}</div>
+            )}
+          </div>
+
+          <div className="setting-divider" />
+
           <button className="setting-item" onClick={handleReconnect} aria-label="Change connection settings">
             <span className="setting-icon" aria-hidden="true">🔄</span>
             <span>Change Connection</span>
