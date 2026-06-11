@@ -33,6 +33,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateCheck: () => ipcRenderer.invoke('update:check'),
   updateGetVersion: () => ipcRenderer.invoke('update:get-version'),
 
+  // Slack bridge
+  slackGetConfig: () => ipcRenderer.invoke('slack:get-config'),
+  slackSetConfig: (cfg: { enabled: boolean; channelId: string; onlyWhenAway: boolean; token?: string | null }) => ipcRenderer.invoke('slack:set-config', cfg),
+  slackTest: () => ipcRenderer.invoke('slack:test'),
+  slackForward: (text: string, myStatus: string) => ipcRenderer.invoke('slack:forward', text, myStatus),
+  onSlackReply: (callback: (text: string) => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, text: string) => callback(text)
+    ipcRenderer.on('slack:reply', listener)
+    return () => ipcRenderer.removeListener('slack:reply', listener)
+  },
+
   // Network
   getLocalIPs: () => ipcRenderer.invoke('network:get-local-ips'),
   startServer: (port: number, password: string) => ipcRenderer.invoke('network:start-server', port, password),
@@ -196,6 +207,11 @@ export interface ElectronAPI {
   onUpdateStatus: (callback: (s: { status: string; info?: any }) => void) => () => void
   updateCheck: () => Promise<{ ok: boolean; version?: string; reason?: string }>
   updateGetVersion: () => Promise<string>
+  slackGetConfig: () => Promise<{ enabled: boolean; channelId: string; onlyWhenAway: boolean; hasToken: boolean }>
+  slackSetConfig: (cfg: { enabled: boolean; channelId: string; onlyWhenAway: boolean; token?: string | null }) => Promise<{ enabled: boolean; channelId: string; onlyWhenAway: boolean; hasToken: boolean }>
+  slackTest: () => Promise<{ ok: boolean; error?: string }>
+  slackForward: (text: string, myStatus: string) => Promise<{ ok: boolean }>
+  onSlackReply: (callback: (text: string) => void) => () => void
   getLocalIPs: () => Promise<{ name: string; address: string }[]>
   startServer: (port: number, password: string) => Promise<{ success: boolean; error?: string }>
   stopServer: () => Promise<{ success: boolean }>

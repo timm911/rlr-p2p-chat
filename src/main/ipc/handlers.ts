@@ -9,6 +9,7 @@ import { FileTransferManager, FileTransferState } from '../network/file-transfer
 import { getTTSService, TTSConfig } from '../services/tts'
 import { getWindowsSpeech, SpeechResult } from '../speech/windows-speech'
 import { getNotificationService } from '../services/notification-service'
+import { getSlackBridge } from '../services/slack-bridge'
 
 let tcpServer: TCPServer | null = null
 let tcpClient: TCPClient | null = null
@@ -22,6 +23,25 @@ export function setupIPCHandlers(window: BrowserWindow): void {
   // Initialize notification service with window reference
   const notificationService = getNotificationService()
   notificationService.setWindow(window)
+
+  // Slack bridge: load saved config and relay Slack replies to the renderer
+  // (which forwards them to the peer over the encrypted chat).
+  const slackBridge = getSlackBridge()
+  slackBridge.load()
+  slackBridge.on('reply', (text: string) => {
+    mainWindow?.webContents.send('slack:reply', text)
+  })
+
+  ipcMain.handle('slack:get-config', async () => slackBridge.getStatus())
+  ipcMain.handle('slack:set-config', async (_e, cfg: { enabled: boolean; channelId: string; onlyWhenAway: boolean; token?: string | null }) => {
+    slackBridge.setConfig(cfg)
+    return slackBridge.getStatus()
+  })
+  ipcMain.handle('slack:test', async () => slackBridge.test())
+  ipcMain.handle('slack:forward', async (_e, text: string, myStatus: string) => {
+    await slackBridge.forwardIncoming(text, myStatus)
+    return { ok: true }
+  })
 
   // Setup file transfer event listeners
   fileTransferManager.on('transfer-created', (state: FileTransferState) => {

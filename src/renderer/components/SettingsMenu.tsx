@@ -51,6 +51,13 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
   const [checking, setChecking] = useState(false)
   const [autoAway, setAutoAwayState] = useState(getAutoAwayEnabled)
   const [autoAwayMin, setAutoAwayMinState] = useState(getAutoAwayMinutes)
+  const [showSlack, setShowSlack] = useState(false)
+  const [slackEnabled, setSlackEnabled] = useState(false)
+  const [slackChannel, setSlackChannel] = useState('')
+  const [slackToken, setSlackToken] = useState('') // write-only input; never read back
+  const [slackOnlyAway, setSlackOnlyAway] = useState(true)
+  const [slackHasToken, setSlackHasToken] = useState(false)
+  const [slackMsg, setSlackMsg] = useState('')
   const [autoReconnect, setAutoReconnectState] = useState(getAutoReconnect)
   const [speechEngine, setSpeechEngineState] = useState<SpeechEngineKind>(getSpeechEngineSetting)
   const [diagnostics, setDiagnostics] = useState<{
@@ -104,6 +111,35 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
     const newConfig = { ...ttsConfig, enabled }
     setTtsConfig(newConfig)
     await window.electronAPI.ttsConfigure({ enabled })
+  }
+
+  useEffect(() => {
+    window.electronAPI.slackGetConfig().then((c) => {
+      setSlackEnabled(c.enabled)
+      setSlackChannel(c.channelId)
+      setSlackOnlyAway(c.onlyWhenAway)
+      setSlackHasToken(c.hasToken)
+    }).catch(() => {})
+  }, [])
+
+  const saveSlack = async (overrides?: Partial<{ enabled: boolean; channelId: string; onlyWhenAway: boolean }>) => {
+    const cfg = {
+      enabled: overrides?.enabled ?? slackEnabled,
+      channelId: overrides?.channelId ?? slackChannel,
+      onlyWhenAway: overrides?.onlyWhenAway ?? slackOnlyAway,
+      // Only send the token if the user typed a new one
+      ...(slackToken ? { token: slackToken } : {})
+    }
+    const res = await window.electronAPI.slackSetConfig(cfg)
+    setSlackHasToken(res.hasToken)
+    if (slackToken) setSlackToken('') // clear the input once stored
+  }
+
+  const handleSlackTest = async () => {
+    setSlackMsg('Sending test message…')
+    await saveSlack()
+    const r = await window.electronAPI.slackTest()
+    setSlackMsg(r.ok ? '✅ Sent! Check your Slack channel.' : `❌ ${r.error || 'Failed'}`)
   }
 
   useEffect(() => {
@@ -292,6 +328,81 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
                   <option value={30}>30 minutes</option>
                 </select>
               </div>
+            </div>
+          )}
+
+          <div className="setting-divider" />
+
+          {/* Slack bridge — get messages on your phone, reply from Slack */}
+          <button
+            className="setting-item"
+            onClick={() => setShowSlack(!showSlack)}
+            aria-expanded={showSlack}
+            aria-label="Slack bridge settings"
+          >
+            <span className="setting-icon" aria-hidden="true">📱</span>
+            <span>Slack bridge (phone)</span>
+            <span className="expand-icon" aria-hidden="true">{showSlack ? '▼' : '▶'}</span>
+          </button>
+          {showSlack && (
+            <div className="tts-settings-panel">
+              <div className="tts-info" style={{ marginBottom: 10 }}>
+                Forwards incoming messages to a Slack channel so you see them on
+                your phone, and relays your Slack replies back. Note: message
+                text is sent to Slack's servers when this is on.
+              </div>
+
+              <div className="tts-setting-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={slackEnabled}
+                    onChange={(e) => { setSlackEnabled(e.target.checked); void saveSlack({ enabled: e.target.checked }) }}
+                  /> Enable Slack bridge
+                </label>
+              </div>
+
+              <div className="tts-setting-row">
+                <label htmlFor="slack-token">Bot token (xoxb-…)</label>
+                <input
+                  id="slack-token"
+                  type="password"
+                  placeholder={slackHasToken ? '•••••• (saved — type to replace)' : 'xoxb-…'}
+                  value={slackToken}
+                  onChange={(e) => setSlackToken(e.target.value)}
+                  autoComplete="off"
+                />
+              </div>
+
+              <div className="tts-setting-row">
+                <label htmlFor="slack-channel">Channel ID (e.g. C0123ABC)</label>
+                <input
+                  id="slack-channel"
+                  type="text"
+                  placeholder="C0123ABCDEF"
+                  value={slackChannel}
+                  onChange={(e) => setSlackChannel(e.target.value)}
+                  onBlur={() => void saveSlack()}
+                  autoComplete="off"
+                />
+              </div>
+
+              <div className="tts-setting-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={slackOnlyAway}
+                    onChange={(e) => { setSlackOnlyAway(e.target.checked); void saveSlack({ onlyWhenAway: e.target.checked }) }}
+                  /> Only forward when I'm away
+                </label>
+              </div>
+
+              <div className="tts-setting-row" style={{ marginTop: 6 }}>
+                <button className="test-btn" onClick={handleSlackTest} aria-label="Test Slack connection">
+                  Save &amp; send test message
+                </button>
+              </div>
+              {slackMsg && <div className="tts-info" style={{ marginTop: 8 }}>{slackMsg}</div>}
             </div>
           )}
 
