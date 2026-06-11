@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="purpleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#9b59b6;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#8e44ad;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#6c3483;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background Circle -->
+  <circle cx="128" cy="128" r="120" fill="url(#purpleGradient)"/>
+
+  <!-- Chat Bubble -->
+  <path d="M 80 90 Q 80 70 100 70 L 180 70 Q 200 70 200 90 L 200 140 Q 200 160 180 160 L 130 160 L 100 180 L 100 160 Q 80 160 80 140 Z"
+        fill="white"
+        opacity="0.95"/>
+
+  <!-- Three dots inside bubble -->
+  <circle cx="115" cy="115" r="8" fill="#8e44ad"/>
+  <circle cx="145" cy="115" r="8" fill="#8e44ad"/>
+  <circle cx="175" cy="115" r="8" fill="#8e44ad"/>
+
+  <!-- P2P Symbol - Two small circles connected -->
+  <circle cx="85" cy="200" r="18" fill="white" opacity="0.9"/>
+  <circle cx="171" cy="200" r="18" fill="white" opacity="0.9"/>
+  <line x1="103" y1="200" x2="153" y2="200" stroke="white" stroke-width="6" opacity="0.9"/>
+</svg>

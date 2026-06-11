@@ -1,0 +1,142 @@
+.connection-setup {
+  width: 450px;
+  padding: 40px;
+  color: white;
+}
+
+.connection-setup .title {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 30px;
+  text-align: center;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.status-text {
+  margin-top: 10px;
+  font-size: 14px;
+  text-align: center;
+  opacity: 0.9;
+}
+
+.ip-info {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 15px;
+  margin: 20px 0;
+}
+
+.ip-title {
+  font-size: 13px;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.ip-item {
+  font-size: 12px;
+  opacity: 0.9;
+  margin: 5px 0;
+  font-family: 'Courier New', monospace;
+}
+
+.connection-setup .glass-button {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.connection-setup .glass-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.connection-log-wrap {
+  margin-top: 16px;
+  font-size: 12px;
+}
+
+.connection-log-wrap summary {
+  cursor: pointer;
+  opacity: 0.9;
+}
+
+.connection-log {
+  margin-top: 8px;
+  max-height: 160px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 8px;
+  padding: 8px;
+  font-family: ui-monospace, monospace;
+}
+
+.connection-log-line {
+  margin: 2px 0;
+}
+
+.connection-log-detail {
+  opacity: 0.85;
+}
+
+.connection-log-empty {
+  opacity: 0.7;
+  font-style: italic;
+}
+
+.connection-setup .glass-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Error Message */
+.error-message {
+  background: rgba(248, 113, 113, 0.2);
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin: 15px 0;
+  color: #fca5a5;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Spinner */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: 8px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

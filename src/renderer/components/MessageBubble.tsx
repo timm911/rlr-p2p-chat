@@ -1,0 +1,258 @@
+import { useState, useEffect } from 'react'
+import './MessageBubble.css'
+import type { Message } from './ChatWindow'
+import { linkifyText } from '../utils/linkify'
+
+const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
+function isImageFile(fileType: string): boolean {
+  return IMAGE_EXTENSIONS.some(ext => fileType.toLowerCase().endsWith(ext) || fileType.toLowerCase() === ext.slice(1))
+}
+
+interface Props {
+  message: Message
+  isOwn: boolean
+  onAddReaction: (messageId: string, emoji: string) => void
+  onRemoveReaction: (messageId: string, emoji: string) => void
+}
+
+const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '🔥']
+
+function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction }: Props) {
+  const [showReactionPicker, setShowReactionPicker] = useState(false)
+  const [imageDataUrl, setImageDataUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (message.type !== 'file' || !message.fileTransfer) return
+    const ft = message.fileTransfer
+    if (ft.status !== 'completed' || !ft.filePath || !isImageFile(ft.fileType)) return
+    let cancelled = false
+    window.electronAPI.getFileDataUrl(ft.filePath).then((r: { success?: boolean; dataUrl?: string }) => {
+      if (!cancelled && r.success && r.dataUrl) setImageDataUrl(r.dataUrl)
+    })
+    return () => { cancelled = true }
+  }, [message.type, message.fileTransfer?.status, message.fileTransfer?.filePath, message.fileTransfer?.fileType])
+
+  const formatTime = (timestamp: number) => {
+    const date = new Date(timestamp)
+    return date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    })
+  }
+
+  const formatBytes = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes'
+    const k = 1024
+    const sizes = ['Bytes', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
+  }
+
+  const formatSpeed = (bytesPerSecond: number): string => {
+    return formatBytes(bytesPerSecond) + '/s'
+  }
+
+  const formatETA = (seconds: number): string => {
+    if (seconds < 60) {
+      return `${Math.round(seconds)}s`
+    } else if (seconds < 3600) {
+      const minutes = Math.floor(seconds / 60)
+      return `${minutes}m`
+    } else {
+      const hours = Math.floor(seconds / 3600)
+      const minutes = Math.floor((seconds % 3600) / 60)
+      return `${hours}h ${minutes}m`
+    }
+  }
+
+  const getFileIcon = (fileType: string): string => {
+    const ext = fileType.toLowerCase()
+    if (['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(ext)) return '🖼️'
+    if (['.pdf'].includes(ext)) return '📕'
+    if (['.doc', '.docx', '.txt', '.rtf'].includes(ext)) return '📄'
+    if (['.mp4', '.avi', '.mov', '.mkv', '.webm'].includes(ext)) return '🎬'
+    if (['.mp3', '.wav', '.ogg', '.flac', '.m4a'].includes(ext)) return '🎵'
+    if (['.zip', '.rar', '.7z', '.tar', '.gz'].includes(ext)) return '📦'
+    return '📎'
+  }
+
+  if (message.type === 'system') {
+    return (
+      <div className="system-message" role="status" aria-live="polite">
+        <span>{message.content}</span>
+        <span className="system-time"> • {formatTime(message.timestamp)}</span>
+      </div>
+    )
+  }
+
+  if (message.type === 'file' && message.fileTransfer) {
+    const { fileTransfer } = message
+    return (
+      <div className={`message-wrapper ${isOwn ? 'sent' : 'received'}`}>
+        <div className="message-bubble file-message">
+          <div className="file-transfer-card">
+            <div className="file-header">
+              <div className="file-icon-large">{getFileIcon(fileTransfer.fileType)}</div>
+              <div className="file-details">
+                <div className="file-name">{fileTransfer.fileName}</div>
+                <div className="file-size">{formatBytes(fileTransfer.fileSize)}</div>
+              </div>
+            </div>
+
+            {fileTransfer.status === 'active' && (
+              <div className="file-progress">
+                <div className="progress-bar">
+                  <div className="progress-fill" style={{ width: `${fileTransfer.progress || 0}%` }}></div>
+                </div>
+                <div className="progress-info">
+                  <span>{Math.round(fileTransfer.progress || 0)}%</span>
+                  {fileTransfer.paused && <span className="transfer-paused">Paused</span>}
+                  {!fileTransfer.paused && fileTransfer.speed && fileTransfer.speed > 0 && (
+                    <span className="transfer-speed">{formatSpeed(fileTransfer.speed)}</span>
+                  )}
+                  {!fileTransfer.paused && fileTransfer.eta && fileTransfer.eta > 0 && (
+                    <span className="transfer-eta">ETA: {formatETA(fileTransfer.eta)}</span>
+                  )}
+                </div>
+                <div className="file-transfer-actions">
+                  {fileTransfer.paused ? (
+                    <button
+                      type="button"
+                      className="file-action-btn resume-btn"
+                      onClick={() => window.electronAPI.resumeFileTransfer(fileTransfer.transferId)}
+                      aria-label="Resume transfer"
+                    >
+                      Resume
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="file-action-btn pause-btn"
+                      onClick={() => window.electronAPI.pauseFileTransfer(fileTransfer.transferId)}
+                      aria-label="Pause transfer"
+                    >
+                      Pause
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {fileTransfer.status === 'completed' && (
+              <>
+                {imageDataUrl && (
+                  <div className="file-inline-image">
+                    <a href={imageDataUrl} target="_blank" rel="noopener noreferrer" className="inline-image-link">
+                      <img src={imageDataUrl} alt={fileTransfer.fileName} className="inline-image-thumb" />
+                    </a>
+                  </div>
+                )}
+                <div className="file-status completed">
+                  ✓ Transfer complete
+                </div>
+              </>
+            )}
+
+            {fileTransfer.status === 'failed' && (
+              <div className="file-status failed">
+                ✗ Transfer failed {fileTransfer.error && `(${fileTransfer.error})`}
+              </div>
+            )}
+
+            {fileTransfer.status === 'cancelled' && (
+              <div className="file-status cancelled">
+                Transfer cancelled
+              </div>
+            )}
+
+            {fileTransfer.status === 'pending' && (
+              <div className="file-status pending">
+                Waiting for response...
+              </div>
+            )}
+          </div>
+
+          <div className="message-time">
+            {formatTime(message.timestamp)} • {message.from}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className={`message-wrapper ${isOwn ? 'sent' : 'received'}`}>
+      <div
+        className="message-bubble"
+        onMouseEnter={() => setShowReactionPicker(true)}
+        onMouseLeave={() => setShowReactionPicker(false)}
+      >
+        {showReactionPicker && (
+          <div className="reaction-picker" role="toolbar" aria-label="Add reaction">
+            {REACTION_EMOJIS.map(emoji => (
+              <button
+                key={emoji}
+                className="emoji-btn"
+                onClick={() => onAddReaction(message.id, emoji)}
+                aria-label={`React with ${emoji}`}
+                type="button"
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="message-text">{linkifyText(message.content)}</div>
+
+        {message.linkPreview && (
+          <div className="link-preview">
+            <div className="link-preview-content">
+              <a
+                href={message.linkPreview.url}
+                className="link-url"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                🔗 {message.linkPreview.url}
+              </a>
+              <div className="link-title">{message.linkPreview.title}</div>
+              {message.linkPreview.description && (
+                <div className="link-desc">{message.linkPreview.description}</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {message.reactions && Object.keys(message.reactions).length > 0 && (
+          <div className="reactions">
+            {Object.entries(message.reactions).map(([emoji, count]) => (
+              <button
+                key={emoji}
+                type="button"
+                className="reaction-badge reaction-badge-btn"
+                onClick={() => onRemoveReaction(message.id, emoji)}
+                title="Click to remove this reaction"
+                aria-label={`Remove ${emoji} reaction`}
+              >
+                {emoji} <span className="reaction-count">{count}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="message-time">
+          {formatTime(message.timestamp)} • {message.from}
+          {isOwn && message.type === 'chat' && message.deliveryStatus && (
+            <span className="delivery-status" title={message.deliveryStatus === 'delivered' ? 'Delivered' : 'Sending'}>
+              {message.deliveryStatus === 'delivered' ? ' ✓✓' : ' ✓'}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default MessageBubble

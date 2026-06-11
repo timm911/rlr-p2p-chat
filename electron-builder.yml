@@ -1,0 +1,54 @@
+appId: com.rlr.p2pchat
+productName: RLR P2P Chat
+copyright: Copyright © 2025 RLRJupiter & Ripster
+directories:
+  output: release
+  buildResources: build
+# Auto-update feed: GitHub Releases (public repo, no credentials needed by app)
+publish:
+  provider: github
+  owner: timm911
+  repo: rlr-p2p-chat
+files:
+  - dist-electron/**/*
+  - out/**/*
+  - node_modules/**/*
+  - package.json
+# Vosk offline speech model (loaded by the renderer for STT; see speech-engine.ts)
+extraResources:
+  - from: models/vosk-model-small-en-us-0.15.tar.gz
+    to: models/vosk-model-small-en-us-0.15.tar.gz
+  # Piper neural TTS engine + bundled voices (see services/piper-tts.ts)
+  - from: piper-engine
+    to: piper-engine
+  - from: voices
+    to: voices
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  icon: build/icons/icon.ico
+  artifactName: ${productName}-Setup-${version}.${ext}
+  sign: null
+  verifyUpdateCodeSignature: false
+  # Windows 8.1 support requires Electron 21 or earlier
+  # Current Electron 39 requires Windows 10+
+  # To support Windows 8.1: npm install electron@21.4.4 --save-dev
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: RLR P2P Chat
+  installerIcon: build/icons/icon.ico
+  uninstallerIcon: build/icons/icon.ico
+  installerHeaderIcon: build/icons/icon.ico
+  allowElevation: true
+  deleteAppDataOnUninstall: false
+portable:
+  artifactName: ${productName}-Portable-${version}.${ext}
