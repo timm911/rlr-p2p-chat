@@ -9,7 +9,6 @@ import { FileTransferManager, FileTransferState } from '../network/file-transfer
 import { getTTSService, TTSConfig } from '../services/tts'
 import { getWindowsSpeech, SpeechResult } from '../speech/windows-speech'
 import { getNotificationService } from '../services/notification-service'
-import { getSlackBridge } from '../services/slack-bridge'
 
 let tcpServer: TCPServer | null = null
 let tcpClient: TCPClient | null = null
@@ -23,25 +22,6 @@ export function setupIPCHandlers(window: BrowserWindow): void {
   // Initialize notification service with window reference
   const notificationService = getNotificationService()
   notificationService.setWindow(window)
-
-  // Slack bridge: load saved config and relay Slack replies to the renderer
-  // (which forwards them to the peer over the encrypted chat).
-  const slackBridge = getSlackBridge()
-  slackBridge.load()
-  slackBridge.on('reply', (text: string) => {
-    mainWindow?.webContents.send('slack:reply', text)
-  })
-
-  ipcMain.handle('slack:get-config', async () => slackBridge.getStatus())
-  ipcMain.handle('slack:set-config', async (_e, cfg: { enabled: boolean; channelId: string; onlyWhenAway: boolean; token?: string | null }) => {
-    slackBridge.setConfig(cfg)
-    return slackBridge.getStatus()
-  })
-  ipcMain.handle('slack:test', async () => slackBridge.test())
-  ipcMain.handle('slack:forward', async (_e, text: string, myStatus: string) => {
-    await slackBridge.forwardIncoming(text, myStatus)
-    return { ok: true }
-  })
 
   // Setup file transfer event listeners
   fileTransferManager.on('transfer-created', (state: FileTransferState) => {
@@ -504,6 +484,24 @@ export function setupIPCHandlers(window: BrowserWindow): void {
       return { success: true, dataUrl: `data:${mime};base64,${buf.toString('base64')}`, kind: audioMimes[ext] ? 'audio' : 'image' }
     } catch (err: any) {
       return { success: false, error: err?.message || 'Failed to read file' }
+    }
+  })
+
+  // Return a bundled notification sound as a data URL (renderer plays it).
+  ipcMain.handle('sound:get-bundled', async (_event, name: string) => {
+    try {
+      if (!/^[a-z0-9-]{1,30}$/i.test(name)) return { success: false, error: 'bad name' }
+      const candidates = app.isPackaged
+        ? [path.join(process.resourcesPath, 'sounds', `${name}.wav`)]
+        : [path.join(app.getAppPath(), 'sounds', `${name}.wav`), path.join(process.cwd(), 'sounds', `${name}.wav`)]
+      for (const p of candidates) {
+        if (fs.existsSync(p)) {
+          return { success: true, dataUrl: `data:audio/wav;base64,${fs.readFileSync(p).toString('base64')}` }
+        }
+      }
+      return { success: false, error: 'not found' }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'failed' }
     }
   })
 

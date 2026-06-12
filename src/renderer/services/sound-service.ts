@@ -85,10 +85,12 @@ class SoundService {
   }
 
   /**
-   * Play a sound effect using Web Audio API
+   * Play a sound effect using Web Audio API.
+   * `force` bypasses the mute/enabled gates (used by Settings preview buttons,
+   * where the user explicitly asked to hear the sound).
    */
-  public play(soundType: SoundType): void {
-    if (this.config.muted || !this.config.enabled || !this.audioContext) {
+  public play(soundType: SoundType, force = false): void {
+    if (!this.audioContext || (!force && (this.config.muted || !this.config.enabled))) {
       return
     }
 

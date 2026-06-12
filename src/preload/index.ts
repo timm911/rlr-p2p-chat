@@ -33,17 +33,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateCheck: () => ipcRenderer.invoke('update:check'),
   updateGetVersion: () => ipcRenderer.invoke('update:get-version'),
 
-  // Slack bridge
-  slackGetConfig: () => ipcRenderer.invoke('slack:get-config'),
-  slackSetConfig: (cfg: { enabled: boolean; channelId: string; onlyWhenAway: boolean; token?: string | null }) => ipcRenderer.invoke('slack:set-config', cfg),
-  slackTest: () => ipcRenderer.invoke('slack:test'),
-  slackForward: (text: string, myStatus: string) => ipcRenderer.invoke('slack:forward', text, myStatus),
-  onSlackReply: (callback: (text: string) => void) => {
-    const listener = (_e: Electron.IpcRendererEvent, text: string) => callback(text)
-    ipcRenderer.on('slack:reply', listener)
-    return () => ipcRenderer.removeListener('slack:reply', listener)
-  },
-
   // Network
   getLocalIPs: () => ipcRenderer.invoke('network:get-local-ips'),
   startServer: (port: number, password: string) => ipcRenderer.invoke('network:start-server', port, password),
@@ -126,6 +115,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // File transfer
   saveClipboardImage: () => ipcRenderer.invoke('file:save-clipboard-image'),
   saveTempAudio: (bytes: Uint8Array, ext?: string) => ipcRenderer.invoke('file:save-temp-audio', bytes, ext),
+  getBundledSound: (name: string) => ipcRenderer.invoke('sound:get-bundled', name),
   readClipboardText: () => ipcRenderer.invoke('clipboard:read-text'),
   secureEncrypt: (text: string) => ipcRenderer.invoke('secure:encrypt', text),
   secureDecrypt: (b64: string) => ipcRenderer.invoke('secure:decrypt', b64),
@@ -207,11 +197,6 @@ export interface ElectronAPI {
   onUpdateStatus: (callback: (s: { status: string; info?: any }) => void) => () => void
   updateCheck: () => Promise<{ ok: boolean; version?: string; reason?: string }>
   updateGetVersion: () => Promise<string>
-  slackGetConfig: () => Promise<{ enabled: boolean; channelId: string; onlyWhenAway: boolean; hasToken: boolean }>
-  slackSetConfig: (cfg: { enabled: boolean; channelId: string; onlyWhenAway: boolean; token?: string | null }) => Promise<{ enabled: boolean; channelId: string; onlyWhenAway: boolean; hasToken: boolean }>
-  slackTest: () => Promise<{ ok: boolean; error?: string }>
-  slackForward: (text: string, myStatus: string) => Promise<{ ok: boolean }>
-  onSlackReply: (callback: (text: string) => void) => () => void
   getLocalIPs: () => Promise<{ name: string; address: string }[]>
   startServer: (port: number, password: string) => Promise<{ success: boolean; error?: string }>
   stopServer: () => Promise<{ success: boolean }>
@@ -258,6 +243,7 @@ export interface ElectronAPI {
   onSpeechError: (callback: (error: string) => void) => () => void
   saveClipboardImage: () => Promise<{ success: boolean; filePath?: string; error?: string }>
   saveTempAudio: (bytes: Uint8Array, ext?: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
+  getBundledSound: (name: string) => Promise<{ success: boolean; dataUrl?: string; error?: string }>
   readClipboardText: () => Promise<string>
   secureEncrypt: (text: string) => Promise<string | null>
   secureDecrypt: (b64: string) => Promise<string | null>

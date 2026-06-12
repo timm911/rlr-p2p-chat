@@ -10,6 +10,7 @@ import { resolveInitialVoice, getSavedVoice, setSavedVoice } from '../utils/tts-
 import { dayLabel, isNewDay } from '../utils/date-format'
 import { getAutoAwayEnabled, getAutoAwayMinutes } from '../utils/auto-away'
 import { getVoiceRecorder } from '../services/voice-recorder'
+import { playSelectedNotification } from '../services/notification-sound'
 import { getSilenceTimeoutMs, getNoSpeechTimeoutMs } from '../utils/voice-timeouts'
 import './ChatWindow.css'
 
@@ -106,7 +107,6 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
   const autoAwayActiveRef = useRef<boolean>(false)
   const statusBeforeAwayRef = useRef<Status>('Talk to me')
   const handleStatusChangeRef = useRef<(s: Status, opts?: { auto?: boolean }) => void>(() => {})
-  const sendChatMessageRef = useRef<(t: string, o?: { source?: 'speech' | 'text'; bypassThrottle?: boolean }) => Promise<boolean>>(async () => false)
   // Texts recently played by TTS, kept for echo detection (mic hearing speakers)
   const recentTTSTextsRef = useRef<Array<{ text: string; time: number }>>([])
   // Show the "no microphone" guidance only once instead of per-message spam
@@ -191,14 +191,6 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
   useEffect(() => {
     handleStatusChangeRef.current = handleStatusChange
   })
-
-  // Relay replies you type in Slack back to the peer over the encrypted chat
-  useEffect(() => {
-    const off = window.electronAPI.onSlackReply((text) => {
-      void sendChatMessageRef.current(text, { bypassThrottle: true, source: 'text' })
-    })
-    return off
-  }, [])
 
   // Auto-away: after N minutes idle, flip an active status to Away; restore on
   // the next interaction. Only triggers from "Talk to me"/"Listen only" so an
@@ -499,11 +491,21 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
             return n
           })
         }
-        soundService.play('message-received')
         window.electronAPI.notificationShowMessage(peerName, msg.payload.content)
-        // Forward to Slack (the bridge decides whether to actually send based
-        // on its enabled/only-when-away settings) so it reaches your phone.
-        void window.electronAPI.slackForward(msg.payload.content, myStatusRef.current)
+
+        // Notification sound: play the selected sound only when NOT in a
+        // speech status (those read the message aloud via TTS) — unless TTS is
+        // turned off, in which case fall back to the sound. Mute is handled
+        // inside playSelectedNotification.
+        {
+          const st = myStatusRef.current
+          const speechStatus = st === 'Talk to me' || st === 'Listen only'
+          let playNotif = !speechStatus
+          if (speechStatus) {
+            try { const cfg = await window.electronAPI.ttsGetConfig(); if (!cfg.enabled) playNotif = true } catch (_) {}
+          }
+          if (playNotif) void playSelectedNotification()
+        }
 
         // Voice handling for "Talk to me" and "Listen only" statuses
         const currentStatus = myStatusRef.current
@@ -937,7 +939,6 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
       setIsSending(false)
     }
   }
-  sendChatMessageRef.current = sendChatMessage
 
   /**
    * Any recognition activity — interim words OR finalized segments — counts

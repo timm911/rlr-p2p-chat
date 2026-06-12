@@ -23,6 +23,9 @@ extraResources:
     to: piper-engine
   - from: voices
     to: voices
+  # Notification sounds (selectable in Settings → Notification sound)
+  - from: sounds
+    to: sounds
 win:
   target:
     - target: nsis

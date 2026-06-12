@@ -9,6 +9,7 @@ import { getBackground, setBackground, BACKGROUND_OPTIONS, getInkPreference, set
 import { setSavedVoice } from '../utils/tts-prefs'
 import { getTextScale, setTextScale, MIN_SCALE, MAX_SCALE } from '../utils/text-size'
 import { getAutoAwayEnabled, setAutoAwayEnabled, getAutoAwayMinutes, setAutoAwayMinutes } from '../utils/auto-away'
+import { SOUND_OPTIONS, getSelectedSound, setSelectedSound, getCustomSoundPath, setCustomSoundPath, previewSound, preloadSelected } from '../services/notification-sound'
 import { getAutoReconnect, setAutoReconnect } from '../utils/connection-settings'
 import { getSpeechEngineSetting, setSpeechEngineSetting, SpeechEngineKind } from '../services/speech-engine'
 
@@ -51,13 +52,36 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
   const [checking, setChecking] = useState(false)
   const [autoAway, setAutoAwayState] = useState(getAutoAwayEnabled)
   const [autoAwayMin, setAutoAwayMinState] = useState(getAutoAwayMinutes)
-  const [showSlack, setShowSlack] = useState(false)
-  const [slackEnabled, setSlackEnabled] = useState(false)
-  const [slackChannel, setSlackChannel] = useState('')
-  const [slackToken, setSlackToken] = useState('') // write-only input; never read back
-  const [slackOnlyAway, setSlackOnlyAway] = useState(true)
-  const [slackHasToken, setSlackHasToken] = useState(false)
-  const [slackMsg, setSlackMsg] = useState('')
+  const [showNotifSound, setShowNotifSound] = useState(false)
+  const [notifSound, setNotifSound] = useState(getSelectedSound)
+  const [customName, setCustomName] = useState(() => {
+    const p = getCustomSoundPath(); return p ? p.split(/[\\/]/).pop() || '' : ''
+  })
+  const [notifSoundMsg, setNotifSoundMsg] = useState('')
+
+  const pickCustomSound = async () => {
+    // A previously-chosen custom file is re-selected with one click (no
+    // dialog). Clicking again while already selected browses for a new file.
+    if (notifSound !== 'custom' && getCustomSoundPath()) {
+      setSelectedSound('custom')
+      setNotifSound('custom')
+      setNotifSoundMsg('')
+      preloadSelected()
+      return
+    }
+    const r = await window.electronAPI.pickFile()
+    if (r.cancelled || !r.success || !r.filePath) return
+    if (!/\.(wav|mp3|ogg|m4a)$/i.test(r.filePath)) {
+      setNotifSoundMsg('Please choose a .wav, .mp3, .ogg or .m4a file.')
+      return
+    }
+    setCustomSoundPath(r.filePath)
+    setSelectedSound('custom')
+    setNotifSound('custom')
+    setCustomName(r.filePath.split(/[\\/]/).pop() || 'custom')
+    setNotifSoundMsg('')
+    void previewSound('custom')
+  }
   const [autoReconnect, setAutoReconnectState] = useState(getAutoReconnect)
   const [speechEngine, setSpeechEngineState] = useState<SpeechEngineKind>(getSpeechEngineSetting)
   const [diagnostics, setDiagnostics] = useState<{
@@ -111,35 +135,6 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
     const newConfig = { ...ttsConfig, enabled }
     setTtsConfig(newConfig)
     await window.electronAPI.ttsConfigure({ enabled })
-  }
-
-  useEffect(() => {
-    window.electronAPI.slackGetConfig().then((c) => {
-      setSlackEnabled(c.enabled)
-      setSlackChannel(c.channelId)
-      setSlackOnlyAway(c.onlyWhenAway)
-      setSlackHasToken(c.hasToken)
-    }).catch(() => {})
-  }, [])
-
-  const saveSlack = async (overrides?: Partial<{ enabled: boolean; channelId: string; onlyWhenAway: boolean }>) => {
-    const cfg = {
-      enabled: overrides?.enabled ?? slackEnabled,
-      channelId: overrides?.channelId ?? slackChannel,
-      onlyWhenAway: overrides?.onlyWhenAway ?? slackOnlyAway,
-      // Only send the token if the user typed a new one
-      ...(slackToken ? { token: slackToken } : {})
-    }
-    const res = await window.electronAPI.slackSetConfig(cfg)
-    setSlackHasToken(res.hasToken)
-    if (slackToken) setSlackToken('') // clear the input once stored
-  }
-
-  const handleSlackTest = async () => {
-    setSlackMsg('Sending test message…')
-    await saveSlack()
-    const r = await window.electronAPI.slackTest()
-    setSlackMsg(r.ok ? '✅ Sent! Check your Slack channel.' : `❌ ${r.error || 'Failed'}`)
   }
 
   useEffect(() => {
@@ -333,76 +328,56 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
 
           <div className="setting-divider" />
 
-          {/* Slack bridge — get messages on your phone, reply from Slack */}
+          {/* Notification sound — plays for incoming messages when unmuted and
+              not in a speech status (Talk to me / Listen only) */}
           <button
             className="setting-item"
-            onClick={() => setShowSlack(!showSlack)}
-            aria-expanded={showSlack}
-            aria-label="Slack bridge settings"
+            onClick={() => setShowNotifSound(!showNotifSound)}
+            aria-expanded={showNotifSound}
+            aria-label="Notification sound settings"
           >
-            <span className="setting-icon" aria-hidden="true">📱</span>
-            <span>Slack bridge (phone)</span>
-            <span className="expand-icon" aria-hidden="true">{showSlack ? '▼' : '▶'}</span>
+            <span className="setting-icon" aria-hidden="true">🔔</span>
+            <span>Notification sound</span>
+            <span className="expand-icon" aria-hidden="true">{showNotifSound ? '▼' : '▶'}</span>
           </button>
-          {showSlack && (
+          {showNotifSound && (
             <div className="tts-settings-panel">
               <div className="tts-info" style={{ marginBottom: 10 }}>
-                Forwards incoming messages to a Slack channel so you see them on
-                your phone, and relays your Slack replies back. Note: message
-                text is sent to Slack's servers when this is on.
+                Plays for incoming messages when you're not muted and not in a
+                "Talk to me"/"Listen only" status (those read messages aloud).
               </div>
-
-              <div className="tts-setting-row">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={slackEnabled}
-                    onChange={(e) => { setSlackEnabled(e.target.checked); void saveSlack({ enabled: e.target.checked }) }}
-                  /> Enable Slack bridge
-                </label>
+              <div className="notif-sound-list">
+                {SOUND_OPTIONS.map((opt) => (
+                  <div key={opt.id} className={`notif-sound-row ${notifSound === opt.id ? 'selected' : ''}`}>
+                    <button
+                      type="button"
+                      className="notif-sound-pick"
+                      onClick={() => { setNotifSound(opt.id); setSelectedSound(opt.id); preloadSelected() }}
+                    >
+                      <span className="notif-sound-check">{notifSound === opt.id ? '✓' : ''}</span>
+                      {opt.label}
+                    </button>
+                    {opt.kind !== 'none' && (
+                      <button type="button" className="notif-sound-play" onClick={() => previewSound(opt.id)} aria-label={`Preview ${opt.label}`}>▶</button>
+                    )}
+                  </div>
+                ))}
+                <div className={`notif-sound-row ${notifSound === 'custom' ? 'selected' : ''}`}>
+                  <button
+                    type="button"
+                    className="notif-sound-pick"
+                    onClick={pickCustomSound}
+                    title={customName && notifSound === 'custom' ? 'Click to choose a different file' : undefined}
+                  >
+                    <span className="notif-sound-check">{notifSound === 'custom' ? '✓' : ''}</span>
+                    {customName ? `Custom: ${customName}` : 'Custom… (browse)'}
+                  </button>
+                  {customName && (
+                    <button type="button" className="notif-sound-play" onClick={() => previewSound('custom')} aria-label="Preview custom sound">▶</button>
+                  )}
+                </div>
               </div>
-
-              <div className="tts-setting-row">
-                <label htmlFor="slack-token">Bot token (xoxb-…)</label>
-                <input
-                  id="slack-token"
-                  type="password"
-                  placeholder={slackHasToken ? '•••••• (saved — type to replace)' : 'xoxb-…'}
-                  value={slackToken}
-                  onChange={(e) => setSlackToken(e.target.value)}
-                  autoComplete="off"
-                />
-              </div>
-
-              <div className="tts-setting-row">
-                <label htmlFor="slack-channel">Channel ID (e.g. C0123ABC)</label>
-                <input
-                  id="slack-channel"
-                  type="text"
-                  placeholder="C0123ABCDEF"
-                  value={slackChannel}
-                  onChange={(e) => setSlackChannel(e.target.value)}
-                  onBlur={() => void saveSlack()}
-                  autoComplete="off"
-                />
-              </div>
-
-              <div className="tts-setting-row">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={slackOnlyAway}
-                    onChange={(e) => { setSlackOnlyAway(e.target.checked); void saveSlack({ onlyWhenAway: e.target.checked }) }}
-                  /> Only forward when I'm away
-                </label>
-              </div>
-
-              <div className="tts-setting-row" style={{ marginTop: 6 }}>
-                <button className="test-btn" onClick={handleSlackTest} aria-label="Test Slack connection">
-                  Save &amp; send test message
-                </button>
-              </div>
-              {slackMsg && <div className="tts-info" style={{ marginTop: 8 }}>{slackMsg}</div>}
+              {notifSoundMsg && <div className="tts-info" style={{ marginTop: 8 }}>{notifSoundMsg}</div>}
             </div>
           )}
 

@@ -436,3 +436,54 @@ body.theme-light .density-select {
   font-weight: bold;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
 }
+
+/* Notification sound picker */
+.notif-sound-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.notif-sound-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+}
+.notif-sound-row.selected {
+  background: rgba(124, 58, 237, 0.12);
+}
+.notif-sound-pick {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  background: none;
+  border: none;
+  color: #333;
+  font-size: 13px;
+  padding: 7px 8px;
+  cursor: pointer;
+  border-radius: 8px;
+}
+.notif-sound-pick:hover {
+  background: rgba(102, 126, 234, 0.1);
+}
+.notif-sound-check {
+  width: 14px;
+  color: #7c3aed;
+  font-weight: bold;
+}
+.notif-sound-play {
+  background: rgba(124, 58, 237, 0.15);
+  border: none;
+  color: #7c3aed;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.notif-sound-play:hover {
+  background: rgba(124, 58, 237, 0.3);
+}
