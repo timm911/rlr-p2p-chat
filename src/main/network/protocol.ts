@@ -2,7 +2,7 @@
 import { createHash } from 'crypto'
 
 export interface ProtocolMessage {
-  type: 'chat' | 'chat-ack' | 'status' | 'reaction' | 'reaction-remove' | 'typing' | 'ping' | 'pong' | 'file-offer' | 'file-accept' | 'file-reject' | 'file-chunk' | 'file-complete' | 'file-cancel' | 'file-pause' | 'file-resume' | 'auth' | 'auth-success' | 'auth-failed' | 'hello'
+  type: 'chat' | 'chat-ack' | 'status' | 'reaction' | 'reaction-remove' | 'typing' | 'ping' | 'pong' | 'file-offer' | 'file-accept' | 'file-reject' | 'file-chunk' | 'file-complete' | 'file-cancel' | 'file-pause' | 'file-resume' | 'auth' | 'auth-success' | 'auth-failed' | 'hello' | 'call-request' | 'call-accept' | 'call-decline' | 'call-end' | 'call-audio' | 'read-receipt' | 'nudge' | 'app-version'
   payload: any
   timestamp: number
 }
@@ -80,6 +80,14 @@ export interface FileCancel {
   transferId: string
   reason: string
   timestamp: number
+}
+
+/**
+ * One frame of live call audio: 16 kHz mono signed 16-bit PCM,
+ * little-endian, base64-encoded (~20-45 ms per frame).
+ */
+export interface CallAudioFrame {
+  data: string
 }
 
 export function encodeMessage(msg: ProtocolMessage): string {

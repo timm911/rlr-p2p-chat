@@ -13,6 +13,7 @@ export type SoundType =
   | 'reconnect'
   | 'ptt-start'
   | 'ptt-stop'
+  | 'nudge'
 
 interface SoundConfig {
   enabled: boolean
@@ -127,6 +128,9 @@ class SoundService {
           break
         case 'ptt-stop':
           this.playPTTStop()
+          break
+        case 'nudge':
+          this.playNudge()
           break
       }
     } catch (error) {
@@ -251,6 +255,17 @@ class SoundService {
   private playPTTStop(): void {
     // Quick low beep
     this.beep(400, 0.05)
+  }
+
+  private playNudge(): void {
+    // Attention buzz: rapid alternating square-wave tones (distinct from
+    // the gentler notification chimes)
+    this.playSequence([
+      { frequency: 880, duration: 0.08, type: 'square' },
+      { frequency: 660, duration: 0.08, type: 'square' },
+      { frequency: 880, duration: 0.08, type: 'square' },
+      { frequency: 660, duration: 0.14, type: 'square' }
+    ])
   }
 }
 

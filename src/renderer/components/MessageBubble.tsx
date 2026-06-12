@@ -19,11 +19,15 @@ interface Props {
   isOwn: boolean
   onAddReaction: (messageId: string, emoji: string) => void
   onRemoveReaction: (messageId: string, emoji: string) => void
+  onReply: (message: Message) => void
+  /** Open the full emoji picker to react with ANY emoji (➕ button) */
+  onOpenReactionPicker?: (messageId: string) => void
+  showSeen?: boolean
 }
 
 const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '🔥']
 
-function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction }: Props) {
+function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onReply, onOpenReactionPicker, showSeen }: Props) {
   const [showReactionPicker, setShowReactionPicker] = useState(false)
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null)
   const [audioDataUrl, setAudioDataUrl] = useState<string | null>(null)
@@ -102,7 +106,24 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction }: Prop
     const { fileTransfer } = message
     return (
       <div className={`message-wrapper ${isOwn ? 'sent' : 'received'}`}>
-        <div className="message-bubble file-message">
+        <div
+          className="message-bubble file-message"
+          onMouseEnter={() => setShowReactionPicker(true)}
+          onMouseLeave={() => setShowReactionPicker(false)}
+        >
+          {showReactionPicker && (
+            <div className="reaction-picker" role="toolbar" aria-label="Message actions">
+              <button
+                className="emoji-btn reply-btn"
+                onClick={() => onReply(message)}
+                aria-label="Reply to this message"
+                title="Reply"
+                type="button"
+              >
+                ↩️
+              </button>
+            </div>
+          )}
           <div className="file-transfer-card">
             <div className="file-header">
               <div className="file-icon-large">{(isAudioFile(fileTransfer.fileType) || isAudioFile(fileTransfer.fileName)) ? '🎙️' : getFileIcon(fileTransfer.fileType)}</div>
@@ -220,6 +241,33 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction }: Prop
                 {emoji}
               </button>
             ))}
+            {onOpenReactionPicker && (
+              <button
+                className="emoji-btn more-reactions-btn"
+                onClick={() => onOpenReactionPicker(message.id)}
+                aria-label="More reactions"
+                title="React with any emoji"
+                type="button"
+              >
+                ➕
+              </button>
+            )}
+            <button
+              className="emoji-btn reply-btn"
+              onClick={() => onReply(message)}
+              aria-label="Reply to this message"
+              title="Reply"
+              type="button"
+            >
+              ↩️
+            </button>
+          </div>
+        )}
+
+        {message.replyTo && (
+          <div className="reply-quote" title={`Replying to ${message.replyTo.from}`}>
+            <div className="reply-quote-from">{message.replyTo.from}</div>
+            <div className="reply-quote-snippet">{message.replyTo.snippet}</div>
           </div>
         )}
 
@@ -264,11 +312,26 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction }: Prop
         <div className="message-time">
           {formatTime(message.timestamp)} • {message.from}
           {isOwn && message.type === 'chat' && message.deliveryStatus && (
-            <span className="delivery-status" title={message.deliveryStatus === 'delivered' ? 'Delivered' : 'Sending'}>
-              {message.deliveryStatus === 'delivered' ? ' ✓✓' : ' ✓'}
+            <span
+              className="delivery-status"
+              title={
+                message.deliveryStatus === 'queued'
+                  ? 'Queued — sends when reconnected'
+                  : message.deliveryStatus === 'sending'
+                    ? 'Sending'
+                    : message.deliveryStatus === 'seen'
+                      ? 'Seen'
+                      : 'Delivered'
+              }
+            >
+              {message.deliveryStatus === 'queued' ? ' ⏳' : message.deliveryStatus === 'sending' ? ' ✓' : ' ✓✓'}
             </span>
           )}
         </div>
+
+        {showSeen && isOwn && message.type === 'chat' && (
+          <div className="seen-label">Seen</div>
+        )}
       </div>
     </div>
   )

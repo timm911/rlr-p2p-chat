@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   updateCheck: () => ipcRenderer.invoke('update:check'),
   updateGetVersion: () => ipcRenderer.invoke('update:get-version'),
+  updateSetInterval: (ms: number) => ipcRenderer.invoke('update:set-interval', ms),
 
   // Network
   getLocalIPs: () => ipcRenderer.invoke('network:get-local-ips'),
@@ -197,6 +198,7 @@ export interface ElectronAPI {
   onUpdateStatus: (callback: (s: { status: string; info?: any }) => void) => () => void
   updateCheck: () => Promise<{ ok: boolean; version?: string; reason?: string }>
   updateGetVersion: () => Promise<string>
+  updateSetInterval: (ms: number) => Promise<{ ok: boolean }>
   getLocalIPs: () => Promise<{ name: string; address: string }[]>
   startServer: (port: number, password: string) => Promise<{ success: boolean; error?: string }>
   stopServer: () => Promise<{ success: boolean }>

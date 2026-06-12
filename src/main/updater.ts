@@ -13,10 +13,32 @@
  */
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { autoUpdater } from 'electron-updater'
+import * as fs from 'fs'
+import * as path from 'path'
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000 // every 6 hours
 
+/**
+ * The app's own version. When packaged, app.getVersion() is correct. When
+ * unpackaged (dev / smoke tests launch `electron dist-electron/main/index.js`)
+ * it falls back to Electron's version (e.g. "21.4.4"), which would poison the
+ * What's-new "last seen version" bookkeeping — so read package.json instead.
+ */
+export function getAppVersion(): string {
+  if (app.isPackaged) return app.getVersion()
+  try {
+    // dist-electron/main → project root
+    const pkgPath = path.join(__dirname, '..', '..', 'package.json')
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
+    if (pkg && typeof pkg.version === 'string') return pkg.version
+  } catch (_) {}
+  return app.getVersion()
+}
+
 let mainWin: BrowserWindow | null = null
+let periodicTimer: NodeJS.Timeout | null = null
+let intervalMs = CHECK_INTERVAL_MS
+let doCheck: () => void = () => {}
 
 function send(status: string, info?: any): void {
   try {
@@ -29,7 +51,19 @@ export function setupAutoUpdater(win: BrowserWindow): void {
 
   // Current version + manual check are available even in dev (dev just reports
   // it can't update), so the Settings UI always works.
-  ipcMain.handle('update:get-version', async () => app.getVersion())
+  ipcMain.handle('update:get-version', async () => getAppVersion())
+
+  // Renderer sets the periodic check interval by identity (Ripster checks
+  // often; RLRJupiter every 6h + peer-version gossip). Registered always so
+  // the call is safe in dev (it just adjusts the interval; timer only runs
+  // when packaged).
+  ipcMain.handle('update:set-interval', async (_e, ms: number) => {
+    if (typeof ms !== 'number' || ms < 30_000) return { ok: false }
+    intervalMs = ms
+    if (periodicTimer) { clearInterval(periodicTimer); periodicTimer = null }
+    if (app.isPackaged) periodicTimer = setInterval(doCheck, intervalMs)
+    return { ok: true }
+  })
   ipcMain.handle('update:check', async () => {
     if (!app.isPackaged) {
       send('dev')
@@ -82,7 +116,8 @@ export function setupAutoUpdater(win: BrowserWindow): void {
       send('error', { message: err?.message })
     })
   }
+  doCheck = check
 
   setTimeout(check, 8000)
-  setInterval(check, CHECK_INTERVAL_MS)
+  periodicTimer = setInterval(check, intervalMs)
 }

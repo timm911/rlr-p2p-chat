@@ -4,6 +4,13 @@ import { setupIPCHandlers } from './ipc/handlers'
 import { getRestoredWindowOptions, trackWindowState } from './window-state'
 import { setupAutoUpdater } from './updater'
 
+// Test affordance: an alternate userData dir lets two instances run side by
+// side on one machine (used by the Playwright call smoke test). Harmless in
+// production where the variable is never set.
+if (process.env.RLR_USER_DATA) {
+  app.setPath('userData', process.env.RLR_USER_DATA)
+}
+
 let mainWindow: BrowserWindow | null = null
 
 function createWindow(): void {

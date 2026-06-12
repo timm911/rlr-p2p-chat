@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import UserSelection from './components/UserSelection'
 import ConnectionSetup from './components/ConnectionSetup'
 import ChatWindow from './components/ChatWindow'
+import WhatsNew from './components/WhatsNew'
 import { getSavedConnectionMeta, getSavedIdentity, saveIdentity } from './utils/connection-settings'
 import './styles/App.css'
 
@@ -88,6 +89,8 @@ function App() {
 
   return (
     <div className={`app-container ${currentScreen === 'chat' ? 'fullscreen' : ''}`}>
+      {/* "What's new" popup — appears once after an auto-update */}
+      <WhatsNew />
       {updateNotice && (
         <div className="update-notice" role="status" aria-live="polite">
           🔄 {updateNotice}

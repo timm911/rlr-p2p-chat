@@ -349,7 +349,11 @@ export class TCPServer extends EventEmitter {
         break
 
       default:
-        console.warn('[TCP Server] Unknown message type:', msg.type)
+        // Forward any other application message type to the renderer. New
+        // feature message types (nudge, reply, read-receipt, call signaling,
+        // call audio, …) only need to be added to the protocol + handled in
+        // the renderer — the transport relays them generically.
+        this.emit('message', msg)
     }
   }
 

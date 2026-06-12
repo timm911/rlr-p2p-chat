@@ -397,3 +397,62 @@
   max-width: 100%;
   height: 36px;
 }
+
+/* Quoted original above a reply's text (inset quote bar) */
+.reply-quote {
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border-left: 3px solid rgba(255, 255, 255, 0.55);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.14);
+  font-size: 12px;
+}
+
+.message-wrapper.sent .reply-quote {
+  border-left-color: rgba(124, 58, 237, 0.55);
+  background: rgba(124, 58, 237, 0.10);
+}
+
+.reply-quote-from {
+  font-weight: 600;
+  opacity: 0.85;
+  margin-bottom: 2px;
+}
+
+.reply-quote-snippet {
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 230px;
+}
+
+/* ➕ opens the full emoji picker (react with ANY emoji) */
+.more-reactions-btn {
+  font-size: 14px;
+  opacity: 0.75;
+}
+
+.more-reactions-btn:hover {
+  opacity: 1;
+}
+
+/* Reply button sits at the end of the hover reaction picker */
+.reply-btn {
+  font-size: 17px;
+  border-left: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 0;
+  padding-left: 8px;
+  margin-left: 2px;
+}
+
+/* "Seen" under the most recent sent message the peer has read */
+.seen-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  opacity: 0.65;
+  margin-top: 3px;
+  text-align: right;
+}

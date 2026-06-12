@@ -8,10 +8,23 @@ import { isEchoOfRecentTTS, recordSpokenText } from '../utils/echo-guard'
 import { toSpokenText } from '../utils/linkify'
 import { resolveInitialVoice, getSavedVoice, setSavedVoice } from '../utils/tts-prefs'
 import { dayLabel, isNewDay } from '../utils/date-format'
+import { compareVersions } from '../utils/changelog'
 import { getAutoAwayEnabled, getAutoAwayMinutes } from '../utils/auto-away'
 import { getVoiceRecorder } from '../services/voice-recorder'
+import { getVoiceCall, CallState, CallStateInfo } from '../services/voice-call'
 import { playSelectedNotification } from '../services/notification-sound'
 import { getSilenceTimeoutMs, getNoSpeechTimeoutMs } from '../utils/voice-timeouts'
+import EmojiPicker from './EmojiPicker'
+import {
+  ScheduledMessage,
+  loadScheduledMessages,
+  saveScheduledMessages,
+  newScheduledMessage,
+  dueMessages,
+  presetTimes,
+  formatSendAt,
+  toDatetimeLocalValue
+} from '../utils/scheduled-messages'
 import './ChatWindow.css'
 
 interface Props {
@@ -26,7 +39,12 @@ export interface Message {
   from: string
   content: string
   timestamp: number
-  deliveryStatus?: 'sending' | 'delivered'
+  deliveryStatus?: 'queued' | 'sending' | 'delivered' | 'seen'
+  replyTo?: {
+    id: string
+    from: string
+    snippet: string
+  }
   reactions?: { [emoji: string]: number }
   hasLink?: boolean
   linkPreview?: {
@@ -64,13 +82,29 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
     try { return (localStorage.getItem('rlrchat-peer-status') as Status) || 'Talk to me' } catch { return 'Talk to me' }
   })
   const [isConnected, setIsConnected] = useState(true)
+  const [replyTarget, setReplyTarget] = useState<{ id: string; from: string; snippet: string } | null>(null)
+  const [isShaking, setIsShaking] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [showJumpToBottom, setShowJumpToBottom] = useState(false)
   const [isRecordingVoice, setIsRecordingVoice] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null)
+  // Voice call state (full-duplex audio over the existing encrypted channel)
+  const [callState, setCallState] = useState<CallState>('idle')
+  const [isCallMicMuted, setIsCallMicMuted] = useState(false)
+  const [callSeconds, setCallSeconds] = useState(0)
+  const callTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const callStartTimeRef = useRef<number>(0)
   const [showSettings, setShowSettings] = useState(false)
+  // Full emoji picker: input mode (insert into textarea) + reaction mode (react to a message)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null)
+  // Scheduled messages ("Send later")
+  const [showScheduler, setShowScheduler] = useState(false)
+  const [showScheduledList, setShowScheduledList] = useState(false)
+  const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>(() => loadScheduledMessages())
+  const [customScheduleValue, setCustomScheduleValue] = useState('')
   const [isListening, setIsListening] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [isDraggingInput, setIsDraggingInput] = useState(false)
@@ -102,13 +136,27 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
   const hasSpokenRef = useRef<boolean>(false)
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const wasDisconnectedRef = useRef<boolean>(false)
+  // Offline queue: messages composed while disconnected, flushed in order on reconnect
+  const pendingQueueRef = useRef<Message[]>([])
+  const isConnectedRef = useRef<boolean>(true)
+  const replyTargetRef = useRef<{ id: string; from: string; snippet: string } | null>(null)
+  // Read receipts: last received chat message id + the last id we sent a receipt for
+  const lastReceivedChatIdRef = useRef<string | null>(null)
+  const lastReceiptSentIdRef = useRef<string | null>(null)
+  // Nudge throttle + shake animation timer
+  const lastNudgeSentRef = useRef<number>(0)
+  const shakeTimerRef = useRef<NodeJS.Timeout | null>(null)
   const handleMicClickRef = useRef<() => void>(() => {})
   // Auto-away bookkeeping
   const autoAwayActiveRef = useRef<boolean>(false)
   const statusBeforeAwayRef = useRef<Status>('Talk to me')
   const handleStatusChangeRef = useRef<(s: Status, opts?: { auto?: boolean }) => void>(() => {})
+  const myAppVersionRef = useRef<string>('')
   // Texts recently played by TTS, kept for echo detection (mic hearing speakers)
   const recentTTSTextsRef = useRef<Array<{ text: string; time: number }>>([])
+  // Scheduled messages: live send function for the timer + re-entrancy guard
+  const sendChatMessageRef = useRef<typeof sendChatMessage>(async () => false)
+  const isProcessingScheduledRef = useRef<boolean>(false)
   // Show the "no microphone" guidance only once instead of per-message spam
   const micErrorNoticeShownRef = useRef<boolean>(false)
 
@@ -187,10 +235,64 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
     isListeningRef.current = isListening
   }, [isListening])
 
+  // Connection state ref so async/timer callbacks (speech auto-send) route
+  // through the offline queue correctly instead of seeing a stale value
+  useEffect(() => {
+    isConnectedRef.current = isConnected
+  }, [isConnected])
+
   // Keep a live ref to handleStatusChange for the auto-away timer
   useEffect(() => {
     handleStatusChangeRef.current = handleStatusChange
   })
+
+  // Cache our app version (for peer-version gossip) and set the update-check
+  // cadence by identity: Ripster checks every 5 min so it gets new builds fast;
+  // RLRJupiter every 6h and catches up out-of-cycle when Ripster reports newer.
+  useEffect(() => {
+    window.electronAPI.updateGetVersion().then((v) => { myAppVersionRef.current = v }).catch(() => {})
+    const everyFiveMin = 5 * 60 * 1000
+    const everySixHours = 6 * 60 * 60 * 1000
+    void window.electronAPI.updateSetInterval(userIdentity === 'Ripster' ? everyFiveMin : everySixHours).catch?.(() => {})
+  }, [userIdentity])
+
+  // Keep a live ref to sendChatMessage for the scheduled-messages timer
+  useEffect(() => {
+    sendChatMessageRef.current = sendChatMessage
+  })
+
+  // Scheduled messages ("Send later"): localStorage is the source of truth so
+  // they survive restarts. Every ~15s (plus shortly after launch, to catch
+  // already-overdue ones) send whatever is due through the normal send path —
+  // which also handles the offline queue if we're disconnected.
+  useEffect(() => {
+    const tick = async () => {
+      if (isProcessingScheduledRef.current) return
+      const list = loadScheduledMessages()
+      const due = dueMessages(list, Date.now())
+      if (due.length === 0) return
+      isProcessingScheduledRef.current = true
+      try {
+        for (const m of due) {
+          const ok = await sendChatMessageRef.current(m.text, { source: 'scheduled', bypassThrottle: true })
+          if (ok) {
+            const next = loadScheduledMessages().filter((x) => x.id !== m.id)
+            saveScheduledMessages(next)
+            setScheduledMessages(next)
+          }
+          // On failure leave it stored — the next tick retries
+        }
+      } finally {
+        isProcessingScheduledRef.current = false
+      }
+    }
+    const startup = setTimeout(tick, 2000)
+    const timer = setInterval(tick, 15000)
+    return () => {
+      clearTimeout(startup)
+      clearInterval(timer)
+    }
+  }, [])
 
   // Auto-away: after N minutes idle, flip an active status to Away; restore on
   // the next interaction. Only triggers from "Talk to me"/"Listen only" so an
@@ -254,11 +356,15 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
     }
   }, [])
 
-  // Clear unread badge when window gains focus
+  // Clear unread badge when window gains focus; also tell the peer the most
+  // recent chat message has now been seen (read receipt)
   useEffect(() => {
     const onFocus = () => {
       setUnreadCount(0)
       window.electronAPI.setBadgeCount(0).catch(() => {})
+      if (lastReceivedChatIdRef.current) {
+        sendReadReceipt(lastReceivedChatIdRef.current)
+      }
     }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
@@ -304,6 +410,86 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
     })
     return off
   }, [])
+
+  // Voice call: subscribe to call state changes and surface them in the chat
+  useEffect(() => {
+    const voiceCall = getVoiceCall()
+
+    const offCallState = voiceCall.onStateChange((state: CallState, info?: CallStateInfo) => {
+      setCallState(state)
+
+      if (state === 'in-call') {
+        // A live call owns the mic — never run a voice-message recording at
+        // the same time (the record button is also disabled during a call)
+        stopRecordingTimer()
+        setIsRecordingVoice(false)
+        getVoiceRecorder().cancel()
+        setIsCallMicMuted(false)
+        setCallSeconds(0)
+        callStartTimeRef.current = Date.now()
+        if (callTimerRef.current) clearInterval(callTimerRef.current)
+        callTimerRef.current = setInterval(() => setCallSeconds((s) => s + 1), 1000)
+        addSystemMessage('📞 Call started')
+        return
+      }
+
+      if (callTimerRef.current) {
+        clearInterval(callTimerRef.current)
+        callTimerRef.current = null
+      }
+
+      if (state === 'idle' && info?.reason) {
+        const wasInCall = info.previous === 'in-call'
+        const duration = formatCallDuration(
+          callStartTimeRef.current ? Math.round((Date.now() - callStartTimeRef.current) / 1000) : 0
+        )
+        switch (info.reason) {
+          case 'ended':
+          case 'peer-ended':
+            if (wasInCall) addSystemMessage(`Call ended (${duration})`)
+            else if (info.previous === 'ringing') addSystemMessage(`Missed call from ${peerName}`)
+            else addSystemMessage('Call cancelled')
+            break
+          case 'declined':
+            addSystemMessage('Call declined')
+            break
+          case 'peer-declined':
+            addSystemMessage(`${peerName} declined the call`)
+            break
+          case 'cancelled':
+            addSystemMessage('Call cancelled')
+            break
+          case 'missed':
+            addSystemMessage(`Missed call from ${peerName}`)
+            break
+          case 'no-answer':
+            addSystemMessage(`${peerName} didn't answer`)
+            break
+          case 'mic-error':
+            // onError below already reported the failure details
+            break
+          case 'disconnected':
+            if (wasInCall) addSystemMessage(`Call ended — connection lost (${duration})`)
+            break
+        }
+        callStartTimeRef.current = 0
+      }
+    })
+
+    const offCallError = voiceCall.onError((error) => {
+      addSystemMessage(`Call error: ${error}`)
+    })
+
+    return () => {
+      offCallState()
+      offCallError()
+      if (callTimerRef.current) {
+        clearInterval(callTimerRef.current)
+        callTimerRef.current = null
+      }
+      voiceCall.endLocal()
+    }
+  }, [peerName])
 
   // Initialize speech recognition (Vosk offline engine with SAPI fallback)
   useEffect(() => {
@@ -407,19 +593,25 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (showSettings) {
+        if (showScheduler) {
+          setShowScheduler(false)
+        } else if (showScheduledList) {
+          setShowScheduledList(false)
+        } else if (showSettings) {
           setShowSettings(false)
         } else if (fileOfferDialog) {
           handleFileOfferReject()
         } else if (isListening) {
           cancelSpeech()
+        } else if (replyTarget) {
+          setReplyTargetBoth(null)
         }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [showSettings, fileOfferDialog, isListening])
+  }, [showScheduler, showScheduledList, showSettings, fileOfferDialog, isListening, replyTarget])
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -440,7 +632,9 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
     let mounted = true
     window.electronAPI.historyLoad().then((loaded: any[]) => {
       if (mounted && Array.isArray(loaded) && loaded.length > 0) {
-        setMessages(loaded)
+        // Queued-but-never-sent messages from a previous session would show a
+        // ⏳ forever (the in-memory queue is gone) — drop them on load
+        setMessages(loaded.filter((m: any) => m?.deliveryStatus !== 'queued'))
       }
     })
     return () => { mounted = false }
@@ -476,7 +670,8 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
           timestamp: msg.payload.timestamp,
           reactions: {},
           hasLink: msg.payload.hasLink,
-          linkPreview: msg.payload.linkPreview
+          linkPreview: msg.payload.linkPreview,
+          replyTo: msg.payload.replyTo
         }
         setMessages(prev => [...prev, chatMsg])
         window.electronAPI.sendMessage({
@@ -484,6 +679,12 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
           payload: { messageId: msg.payload.id },
           timestamp: Date.now()
         }).catch(() => {})
+        // Read receipt: tell the peer we've actually seen it (window focused).
+        // If unfocused now, the window 'focus' handler sends it later.
+        lastReceivedChatIdRef.current = msg.payload.id
+        if (document.hasFocus()) {
+          sendReadReceipt(msg.payload.id)
+        }
         if (!document.hasFocus()) {
           setUnreadCount(prev => {
             const n = prev + 1
@@ -558,10 +759,32 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
         }))
       } else if (msg.type === 'chat-ack') {
         setMessages(prev => prev.map(m =>
-          m.id === msg.payload.messageId && m.type === 'chat'
+          m.id === msg.payload.messageId && m.type === 'chat' && m.deliveryStatus !== 'seen'
             ? { ...m, deliveryStatus: 'delivered' as const }
             : m
         ))
+      } else if (msg.type === 'read-receipt') {
+        // Peer has seen this message — upgrade its delivery status
+        setMessages(prev => prev.map(m =>
+          m.id === msg.payload.messageId && m.type === 'chat' && m.from === userIdentity
+            ? { ...m, deliveryStatus: 'seen' as const }
+            : m
+        ))
+      } else if (msg.type === 'nudge') {
+        addSystemMessage(`${peerName} nudged you! 👋`)
+        if (!getSoundService().isMuted()) {
+          soundService.play('nudge')
+        }
+        triggerShake()
+      } else if (msg.type === 'app-version') {
+        // Peer told us their app version. If they're on a newer build, do an
+        // immediate out-of-cycle update check so we catch up without waiting
+        // for the periodic timer.
+        const peerVersion = String(msg.payload?.version || '')
+        if (peerVersion && myAppVersionRef.current && compareVersions(peerVersion, myAppVersionRef.current) > 0) {
+          console.log('[Update] Peer is on newer version', peerVersion, '— checking for update now')
+          void window.electronAPI.updateCheck()
+        }
       } else if (msg.type === 'typing') {
         setPeerTyping(!!msg.payload?.isTyping)
       } else if (msg.type === 'file-offer') {
@@ -596,6 +819,16 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
       } else if (msg.type === 'file-chunk' || msg.type === 'file-complete' || msg.type === 'file-cancel') {
         // These are handled by the file transfer manager in the main process
         // We just update the UI based on events
+      } else if (msg.type === 'call-request') {
+        getVoiceCall().handlePeerRequest()
+      } else if (msg.type === 'call-accept') {
+        getVoiceCall().handlePeerAccept()
+      } else if (msg.type === 'call-decline') {
+        getVoiceCall().handlePeerDecline()
+      } else if (msg.type === 'call-end') {
+        getVoiceCall().handlePeerEnd()
+      } else if (msg.type === 'call-audio') {
+        getVoiceCall().ingestAudio(msg.payload?.data)
       }
     }
 
@@ -615,9 +848,22 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
           payload: { status: myStatusRef.current },
           timestamp: Date.now()
         })
+        // Tell the peer our app version — if they're newer, we'll update; if
+        // we're newer, they will (peer-version-triggered out-of-cycle update).
+        if (myAppVersionRef.current) {
+          void window.electronAPI.sendMessage({
+            type: 'app-version',
+            payload: { version: myAppVersionRef.current },
+            timestamp: Date.now()
+          })
+        }
+        // Deliver anything queued while we were disconnected, in order
+        void flushPendingQueue()
       } else if (state === 'disconnected') {
         wasDisconnectedRef.current = true
         setIsConnected(false)
+        // A call can't outlive its transport — tear it down cleanly
+        getVoiceCall().endLocal('disconnected')
         console.log('[Connection] Disconnected from peer')
       } else if (state === 'connecting' || state === 'reconnecting' || state === 'listening') {
         setIsConnected(false)
@@ -745,9 +991,146 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
     setMessages(prev => [...prev, msg])
   }
 
+  // Tell the peer a chat message has been seen (window focused). Deduped so
+  // focus events don't re-send a receipt for the same message.
+  const sendReadReceipt = (messageId: string) => {
+    if (lastReceiptSentIdRef.current === messageId) return
+    lastReceiptSentIdRef.current = messageId
+    window.electronAPI.sendMessage({
+      type: 'read-receipt',
+      payload: { messageId },
+      timestamp: Date.now()
+    }).catch(() => {})
+  }
+
+  // Shake the window for ~0.6s when the peer nudges us
+  const triggerShake = () => {
+    if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current)
+    setIsShaking(false)
+    // Re-apply on the next frame so back-to-back nudges restart the animation
+    requestAnimationFrame(() => setIsShaking(true))
+    shakeTimerRef.current = setTimeout(() => {
+      setIsShaking(false)
+      shakeTimerRef.current = null
+    }, 700)
+  }
+
+  // Send every message queued while disconnected, oldest first. Stops (and
+  // keeps the rest queued) if the connection drops again mid-flush.
+  const flushPendingQueue = async () => {
+    while (pendingQueueRef.current.length > 0) {
+      const m = pendingQueueRef.current[0]
+      try {
+        const result = await window.electronAPI.sendMessage({
+          type: 'chat',
+          payload: {
+            id: m.id,
+            content: m.content,
+            timestamp: m.timestamp,
+            hasLink: m.hasLink,
+            linkPreview: m.linkPreview,
+            replyTo: m.replyTo
+          },
+          timestamp: m.timestamp
+        })
+        if (!result.success) break
+      } catch {
+        break
+      }
+      pendingQueueRef.current.shift()
+      setMessages(prev => prev.map(x =>
+        x.id === m.id ? { ...x, deliveryStatus: 'sending' as const } : x
+      ))
+    }
+  }
+
+  // Short quoted preview for a reply ("📷 Photo" / "🎙️ Voice message" for media)
+  const snippetFor = (m: Message): string => {
+    if (m.type === 'file' && m.fileTransfer) {
+      const name = (m.fileTransfer.fileName || '').toLowerCase()
+      const type = (m.fileTransfer.fileType || '').toLowerCase()
+      if (/\.(jpe?g|png|gif|bmp|webp)$/.test(name) || /(jpe?g|png|gif|bmp|webp)/.test(type)) return '📷 Photo'
+      if (/\.(webm|ogg|oga|mp3|m4a|wav)$/.test(name) || /audio|webm/.test(type)) return '🎙️ Voice message'
+      return `📎 ${m.fileTransfer.fileName}`
+    }
+    const text = m.content || ''
+    return text.length > 80 ? text.slice(0, 80) + '…' : text
+  }
+
+  const setReplyTargetBoth = (target: { id: string; from: string; snippet: string } | null) => {
+    replyTargetRef.current = target
+    setReplyTarget(target)
+  }
+
+  const handleReply = (m: Message) => {
+    setReplyTargetBoth({ id: m.id, from: m.from, snippet: snippetFor(m) })
+    inputRef.current?.focus()
+  }
+
+  // 👋 nudge: throttled to one every 3 seconds
+  const handleNudgeClick = async () => {
+    if (!isConnected) return
+    const now = Date.now()
+    if (now - lastNudgeSentRef.current < 3000) return
+    lastNudgeSentRef.current = now
+    try {
+      const result = await window.electronAPI.sendMessage({
+        type: 'nudge',
+        payload: {},
+        timestamp: now
+      })
+      if (result.success) addSystemMessage(`You nudged ${peerName}`)
+    } catch (error) {
+      console.error('[Nudge] Failed to send:', error)
+    }
+  }
+
   const handleSendMessage = async () => {
     if (!inputText.trim()) return
     await sendChatMessage(inputText, { source: 'text' })
+  }
+
+  // Insert an emoji at the textarea cursor (or append) and keep focus there
+  const insertEmoji = (emoji: string) => {
+    const el = inputRef.current
+    if (!el) {
+      setInputText(prev => prev + emoji)
+      return
+    }
+    const start = el.selectionStart ?? inputText.length
+    const end = el.selectionEnd ?? start
+    setInputText(inputText.slice(0, start) + emoji + inputText.slice(end))
+    requestAnimationFrame(() => {
+      el.focus()
+      const pos = start + emoji.length
+      try { el.setSelectionRange(pos, pos) } catch (_) {}
+    })
+  }
+
+  // --- Scheduled messages ("Send later") ---
+  const scheduleCurrentInput = (sendAt: number) => {
+    const text = inputText.trim()
+    if (!text) return
+    if (!Number.isFinite(sendAt) || sendAt <= Date.now()) {
+      addSystemMessage('Pick a time in the future to schedule the message.')
+      return
+    }
+    const entry = newScheduledMessage(text, sendAt)
+    const next = [...loadScheduledMessages(), entry]
+    saveScheduledMessages(next)
+    setScheduledMessages(next)
+    setInputText('')
+    setShowScheduler(false)
+    setCustomScheduleValue('')
+    addSystemMessage(`🕐 Message scheduled for ${formatSendAt(sendAt)}`)
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  const cancelScheduledMessage = (id: string) => {
+    const next = loadScheduledMessages().filter((m) => m.id !== id)
+    saveScheduledMessages(next)
+    setScheduledMessages(next)
+    if (next.length === 0) setShowScheduledList(false)
   }
 
   const handleStatusChange = async (newStatus: Status, opts?: { auto?: boolean }) => {
@@ -851,15 +1234,10 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
 
   const sendChatMessage = async (
     rawText: string,
-    options: { source?: 'speech' | 'text'; bypassThrottle?: boolean } = {}
+    options: { source?: 'speech' | 'text' | 'scheduled'; bypassThrottle?: boolean } = {}
   ): Promise<boolean> => {
     const text = rawText.trim()
     if (!text) {
-      return false
-    }
-
-    if (!isConnected) {
-      addSystemMessage('Cannot send message while disconnected.')
       return false
     }
 
@@ -892,6 +1270,12 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
         hasLink
       }
 
+      // A scheduled send fires later, on a timer — never attach whatever reply
+      // quote the user happens to have open at that moment
+      if (replyTargetRef.current && options.source !== 'scheduled') {
+        msg.replyTo = replyTargetRef.current
+      }
+
       if (hasLink) {
         const urlMatch = text.match(/https?:\/\/[^\s]+/i)
         if (urlMatch) {
@@ -903,6 +1287,26 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
         }
       }
 
+      // Offline: queue it instead of refusing — the text shows immediately
+      // with a ⏳ indicator and auto-sends when the connection returns
+      if (!isConnectedRef.current) {
+        msg.deliveryStatus = 'queued'
+        pendingQueueRef.current.push(msg)
+        setMessages(prev => [...prev, msg])
+        // Scheduled sends must not disturb what the user is doing right now
+        // (open reply bar, half-typed input)
+        if (options.source !== 'scheduled') {
+          setReplyTargetBoth(null)
+          if (options.source !== 'speech') {
+            setInputText('')
+          }
+          setTimeout(() => {
+            inputRef.current?.focus()
+          }, 0)
+        }
+        return true
+      }
+
       const sendResult = await window.electronAPI.sendMessage({
         type: 'chat',
         payload: {
@@ -910,7 +1314,8 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
           content: msg.content,
           timestamp: msg.timestamp,
           hasLink: msg.hasLink,
-          linkPreview: msg.linkPreview
+          linkPreview: msg.linkPreview,
+          replyTo: msg.replyTo
         },
         timestamp: msg.timestamp
       })
@@ -921,14 +1326,20 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
 
       setMessages(prev => [...prev, msg])
 
-      if (options.source !== 'speech') {
-        setInputText('')
-      }
+      // Scheduled sends must not disturb what the user is doing right now
+      // (open reply bar, half-typed input, focus)
+      if (options.source !== 'scheduled') {
+        setReplyTargetBoth(null)
 
-      // Auto-focus input field after sending
-      setTimeout(() => {
-        inputRef.current?.focus()
-      }, 0)
+        if (options.source !== 'speech') {
+          setInputText('')
+        }
+
+        // Auto-focus input field after sending
+        setTimeout(() => {
+          inputRef.current?.focus()
+        }, 0)
+      }
 
       return true
     } catch (error) {
@@ -1358,6 +1769,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
   // --- Voice messages (record audio, send as a file) ---
   const startVoiceMessage = async () => {
     if (!isConnected) return
+    if (callState !== 'idle') return // the call owns the mic
     try {
       // Don't run STT and recording at once
       if (isListening) { await getSpeechEngine().stop() }
@@ -1560,6 +1972,23 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
   }
 
+  const formatCallDuration = (totalSeconds: number): string => {
+    const minutes = Math.floor(totalSeconds / 60)
+    const seconds = totalSeconds % 60
+    return `${minutes}:${String(seconds).padStart(2, '0')}`
+  }
+
+  const handleCallButtonClick = () => {
+    if (!isConnected || callState !== 'idle') return
+    getVoiceCall().start()
+  }
+
+  const toggleCallMicMute = () => {
+    const next = !isCallMicMuted
+    getVoiceCall().setMicMuted(next)
+    setIsCallMicMuted(next)
+  }
+
   const formatTime = (seconds: number): string => {
     if (seconds < 60) {
       return `${Math.round(seconds)}s`
@@ -1574,8 +2003,18 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
     }
   }
 
+  // "Seen" renders only under the most recent sent message the peer has seen
+  let lastSeenOwnId: string | undefined
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m.from === userIdentity && m.type === 'chat' && m.deliveryStatus === 'seen') {
+      lastSeenOwnId = m.id
+      break
+    }
+  }
+
   return (
-    <div className="chat-window">
+    <div className={`chat-window ${isShaking ? 'nudge-shake' : ''}`}>
       {/* Header */}
       <div className="chat-header">
         <div className="peer-section no-drag">
@@ -1597,6 +2036,26 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
 
         <div className="header-controls no-drag">
           <StatusDropdown currentStatus={myStatus} onStatusChange={handleStatusChange} />
+
+          <button
+            className={`icon-btn ${callState !== 'idle' ? 'active' : ''}`}
+            onClick={handleCallButtonClick}
+            disabled={!isConnected || callState !== 'idle'}
+            title={callState === 'idle' ? `Call ${peerName}` : 'Call in progress'}
+            aria-label="Start voice call"
+          >
+            📞
+          </button>
+
+          <button
+            className="icon-btn"
+            onClick={handleNudgeClick}
+            disabled={!isConnected}
+            title={`Nudge ${peerName}`}
+            aria-label={`Nudge ${peerName}`}
+          >
+            👋
+          </button>
 
           <button
             className={`icon-btn ${showSearch ? 'active' : ''}`}
@@ -1675,6 +2134,128 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
           }}
           onReconnect={onDisconnect}
         />
+      )}
+
+      {/* Full emoji picker — insert into the message input */}
+      {showEmojiPicker && (
+        <EmojiPicker
+          onPick={insertEmoji}
+          onClose={() => setShowEmojiPicker(false)}
+        />
+      )}
+
+      {/* Full emoji picker — react to a message with ANY emoji (➕ on a bubble) */}
+      {reactionPickerFor && (
+        <EmojiPicker
+          title="React with…"
+          onPick={(emoji) => {
+            void handleAddReaction(reactionPickerFor, emoji)
+            setReactionPickerFor(null)
+          }}
+          onClose={() => setReactionPickerFor(null)}
+        />
+      )}
+
+      {/* "Send later" scheduler */}
+      {showScheduler && (
+        <div
+          className="emoji-picker-backdrop no-drag"
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowScheduler(false) }}
+        >
+          <div className="scheduler-panel" role="dialog" aria-label="Schedule message">
+            <div className="scheduler-title">🕐 Send later</div>
+            {inputText.trim() ? (
+              <div className="scheduler-snippet">
+                “{inputText.trim().length > 60 ? inputText.trim().slice(0, 60) + '…' : inputText.trim()}”
+              </div>
+            ) : (
+              <div className="scheduler-hint">Type a message first, then pick a time.</div>
+            )}
+            <div className="scheduler-presets">
+              {presetTimes(new Date()).map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  className="scheduler-preset-btn"
+                  onClick={() => scheduleCurrentInput(p.sendAt)}
+                  disabled={!inputText.trim()}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <div className="scheduler-custom">
+              <input
+                type="datetime-local"
+                className="scheduler-custom-input"
+                aria-label="Custom date and time"
+                min={toDatetimeLocalValue(new Date())}
+                value={customScheduleValue}
+                onChange={(e) => setCustomScheduleValue(e.target.value)}
+              />
+              <button
+                type="button"
+                className="scheduler-confirm-btn"
+                onClick={() => {
+                  const t = customScheduleValue ? new Date(customScheduleValue).getTime() : NaN
+                  scheduleCurrentInput(t)
+                }}
+                disabled={!inputText.trim() || !customScheduleValue}
+                aria-label="Schedule at custom time"
+              >
+                Schedule
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Outgoing call: calling… bar with cancel */}
+      {callState === 'calling' && (
+        <div className="call-bar" role="status" aria-live="polite">
+          <span className="call-bar-icon" aria-hidden="true">📞</span>
+          Calling {peerName}…
+          <button className="call-btn call-cancel-btn" onClick={() => getVoiceCall().end()} aria-label="Cancel call">
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Active call: timer + mic mute + hang up */}
+      {callState === 'in-call' && (
+        <div className="call-bar in-call" role="status" aria-live="polite">
+          <span className="call-live-dot" aria-hidden="true" />
+          In call with {peerName} — {formatCallDuration(callSeconds)}
+          <button
+            className={`call-btn call-mute-btn ${isCallMicMuted ? 'muted' : ''}`}
+            onClick={toggleCallMicMute}
+            aria-label={isCallMicMuted ? 'Unmute microphone' : 'Mute microphone'}
+            aria-pressed={isCallMicMuted}
+          >
+            {isCallMicMuted ? '🔇 Unmute' : '🎤 Mute'}
+          </button>
+          <button className="call-btn call-hangup-btn" onClick={() => getVoiceCall().end()} aria-label="Hang up call">
+            Hang up
+          </button>
+        </div>
+      )}
+
+      {/* Incoming call modal */}
+      {callState === 'ringing' && (
+        <div className="file-offer-dialog incoming-call-dialog" role="dialog" aria-labelledby="incoming-call-title">
+          <div className="file-offer-content">
+            <h3 id="incoming-call-title">📞 Incoming Call</h3>
+            <p>{peerName} is calling…</p>
+            <div className="dialog-buttons">
+              <button className="btn-accept" onClick={() => getVoiceCall().accept()} aria-label="Accept call">
+                Accept
+              </button>
+              <button className="btn-reject" onClick={() => getVoiceCall().decline()} aria-label="Decline call">
+                Decline
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Voice listening indicator */}
@@ -1776,6 +2357,9 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
                 isOwn={msg.from === userIdentity}
                 onAddReaction={handleAddReaction}
                 onRemoveReaction={handleRemoveReaction}
+                onReply={handleReply}
+                onOpenReactionPicker={(messageId) => setReactionPickerFor(messageId)}
+                showSeen={msg.id === lastSeenOwnId}
               />
             )
           }
@@ -1829,6 +2413,55 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
             </button>
           </div>
         )}
+        {scheduledMessages.length > 0 && (
+          <div className="scheduled-bar no-drag">
+            <button
+              type="button"
+              className="scheduled-bar-toggle"
+              onClick={() => setShowScheduledList(s => !s)}
+              aria-expanded={showScheduledList}
+              aria-label={`${scheduledMessages.length} scheduled message${scheduledMessages.length === 1 ? '' : 's'}`}
+            >
+              🕐 {scheduledMessages.length} scheduled {showScheduledList ? '▾' : '▸'}
+            </button>
+            {showScheduledList && (
+              <div className="scheduled-list">
+                {[...scheduledMessages].sort((a, b) => a.sendAt - b.sendAt).map((m) => (
+                  <div key={m.id} className="scheduled-item">
+                    <span className="scheduled-item-text" title={m.text}>{m.text}</span>
+                    <span className="scheduled-item-time">{formatSendAt(m.sendAt)}</span>
+                    <button
+                      type="button"
+                      className="scheduled-item-cancel"
+                      onClick={() => cancelScheduledMessage(m.id)}
+                      aria-label="Cancel scheduled message"
+                      title="Cancel"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {replyTarget && (
+          <div className="reply-bar no-drag">
+            <div className="reply-bar-text">
+              <span className="reply-bar-label">Replying to {replyTarget.from}</span>
+              <span className="reply-bar-snippet">{replyTarget.snippet}</span>
+            </div>
+            <button
+              type="button"
+              className="reply-bar-cancel"
+              onClick={() => setReplyTargetBoth(null)}
+              aria-label="Cancel reply"
+              title="Cancel reply"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         {isRecordingVoice && (
           <div className="voice-record-bar">
             <span className="rec-dot" aria-hidden="true" />
@@ -1841,7 +2474,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
           <textarea
             ref={inputRef}
             className="input-field"
-            placeholder={isConnected ? "Type your message... (or paste image to send)" : "Disconnected - cannot send messages"}
+            placeholder={isConnected ? "Type your message... (or paste image to send)" : "Disconnected - messages will send when reconnected"}
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyPress={handleKeyPress}
@@ -1852,10 +2485,26 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
               pasteFromClipboard(text)
             }}
             rows={1}
-            disabled={!isConnected || isSending}
+            disabled={isSending}
             aria-label="Message input"
           />
           <div className="input-tools">
+            <button
+              className="tool-btn"
+              title="Insert emoji"
+              onClick={() => setShowEmojiPicker(true)}
+              aria-label="Insert emoji"
+            >
+              😊
+            </button>
+            <button
+              className="tool-btn"
+              title="Send later (schedule this message)"
+              onClick={() => setShowScheduler(true)}
+              aria-label="Schedule message"
+            >
+              🕐
+            </button>
             <button
               className="tool-btn"
               title="Attach file"
@@ -1882,18 +2531,18 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
             </button>
             <button
               className="tool-btn"
-              title="Record a voice message"
+              title={callState === 'idle' ? 'Record a voice message' : 'Unavailable during a call'}
               onClick={startVoiceMessage}
-              disabled={!isConnected}
+              disabled={!isConnected || callState !== 'idle'}
               aria-label="Record a voice message"
             >
               🎙️
             </button>
             <button
               className="tool-btn send-btn"
-              title="Send message"
+              title={isConnected ? 'Send message' : 'Queue message (sends when reconnected)'}
               onClick={handleSendMessage}
-              disabled={!isConnected || !inputText.trim() || isSending}
+              disabled={!inputText.trim() || isSending}
               aria-label="Send message"
             >
               ➤

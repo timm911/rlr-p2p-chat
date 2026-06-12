@@ -378,7 +378,10 @@ export class TCPClient extends EventEmitter {
         break
 
       default:
-        console.warn('[TCP Client] Unknown message type:', msg.type)
+        // Forward any other application message type to the renderer (see the
+        // matching note in tcp-server.ts). New feature message types relay
+        // generically; only protocol + renderer need updating.
+        this.emit('message', msg)
     }
   }
 
