@@ -1,6 +1,6 @@
 {
   "name": "rlr-p2p-chat",
-  "version": "2.16.0",
+  "version": "2.17.0",
   "description": "Two-User Encrypted P2P Desktop Chat App",
   "main": "dist-electron/main/index.js",
   "author": "RLRJupiter & Ripster",

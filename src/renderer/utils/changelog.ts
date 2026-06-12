@@ -14,6 +14,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '2.17.0',
+    items: [
+      '🏷️ Add & delete your own custom statuses',
+      '🔔 Save multiple custom notification sounds'
+    ]
+  },
+  {
     version: '2.16.0',
     items: [
       '📋 Release notes viewer (see version history any time in Settings)',

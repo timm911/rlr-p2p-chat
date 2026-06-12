@@ -487,3 +487,84 @@ body.theme-light .density-select {
 .notif-sound-play:hover {
   background: rgba(124, 58, 237, 0.3);
 }
+.notif-sound-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notif-sound-delete {
+  background: rgba(220, 53, 69, 0.12);
+  border: none;
+  color: #dc3545;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.notif-sound-delete:hover {
+  background: rgba(220, 53, 69, 0.3);
+}
+
+/* Custom statuses (Settings → Statuses) */
+.custom-status-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.custom-status-emoji-btn {
+  background: rgba(124, 58, 237, 0.15);
+  border: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.custom-status-emoji-btn:hover {
+  background: rgba(124, 58, 237, 0.3);
+}
+.custom-status-label-input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 13px;
+  color: #333;
+  outline: none;
+}
+.custom-status-label-input::placeholder {
+  color: #999;
+}
+.custom-status-add-btn {
+  flex-shrink: 0;
+}
+.custom-status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+.custom-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.35);
+}
+.custom-status-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

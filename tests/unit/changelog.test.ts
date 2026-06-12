@@ -64,9 +64,14 @@ describe('entriesToShow', () => {
 })
 
 describe('CHANGELOG seed data', () => {
-  it('has the 2.16.0 release-notes entry first', () => {
-    expect(CHANGELOG[0].version).toBe('2.16.0')
+  it('has the 2.17.0 custom statuses & sounds entry first', () => {
+    expect(CHANGELOG[0].version).toBe('2.17.0')
     expect(CHANGELOG[0].items.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('keeps the 2.16.0 release-notes entry', () => {
+    const entry = CHANGELOG.find((e) => e.version === '2.16.0')
+    expect(entry).toBeDefined()
   })
 
   it('keeps the 2.15.0 feature-drop entry', () => {

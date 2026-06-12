@@ -1,32 +1,36 @@
 import { useState, useRef, useEffect } from 'react'
 import './StatusDropdown.css'
+import {
+  PRESET_STATUSES,
+  listCustomStatuses,
+  getStatusEmoji,
+  CUSTOM_STATUSES_CHANGED_EVENT,
+  CustomStatus
+} from '../utils/custom-statuses'
 
 interface Props {
   currentStatus: string
   onStatusChange: (status: string) => void
 }
 
-const PRESET_STATUSES = [
-  { emoji: '💬', label: 'Talk to me' },
-  { emoji: '👂', label: 'Listen only' },
-  { emoji: '⏰', label: 'BRB' },
-  { emoji: '😴', label: 'Bed' },
-  { emoji: '🍽️', label: 'Dinner' },
-  { emoji: '📺', label: 'TV' },
-  { emoji: '💤', label: 'Away' },
-  { emoji: '👥', label: 'Company' }
-]
-
 function StatusDropdown({ currentStatus, onStatusChange }: Props) {
   const [isOpen, setIsOpen] = useState(false)
   const [customInput, setCustomInput] = useState('')
+  // Saved custom statuses (managed in Settings → Statuses). Kept in sync via
+  // the change event so additions/deletions show up without a remount.
+  const [customStatuses, setCustomStatuses] = useState<CustomStatus[]>(listCustomStatuses)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
-  // Get emoji for current status
+  // Get emoji for current status (preset or saved custom)
   const getCurrentEmoji = () => {
-    const preset = PRESET_STATUSES.find(s => s.label === currentStatus)
-    return preset ? preset.emoji : '✏️'
+    return getStatusEmoji(currentStatus) ?? '✏️'
   }
+
+  useEffect(() => {
+    const refresh = () => setCustomStatuses(listCustomStatuses())
+    window.addEventListener(CUSTOM_STATUSES_CHANGED_EVENT, refresh)
+    return () => window.removeEventListener(CUSTOM_STATUSES_CHANGED_EVENT, refresh)
+  }, [])
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -79,6 +83,20 @@ function StatusDropdown({ currentStatus, onStatusChange }: Props) {
             <button
               key={status.label}
               className="status-option"
+              onClick={() => handleStatusSelect(status.label)}
+              role="menuitem"
+              aria-label={`Set status to ${status.label}`}
+            >
+              <span className="status-emoji" aria-hidden="true">{status.emoji}</span>
+              <span>{status.label}</span>
+            </button>
+          ))}
+
+          {/* Saved custom statuses (added in Settings → Statuses) */}
+          {customStatuses.map(status => (
+            <button
+              key={status.id}
+              className="status-option custom"
               onClick={() => handleStatusSelect(status.label)}
               role="menuitem"
               aria-label={`Set status to ${status.label}`}

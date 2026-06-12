@@ -9,9 +9,11 @@ import { getBackground, setBackground, BACKGROUND_OPTIONS, getInkPreference, set
 import { setSavedVoice } from '../utils/tts-prefs'
 import { getTextScale, setTextScale, MIN_SCALE, MAX_SCALE } from '../utils/text-size'
 import { getAutoAwayEnabled, setAutoAwayEnabled, getAutoAwayMinutes, setAutoAwayMinutes } from '../utils/auto-away'
-import { SOUND_OPTIONS, getSelectedSound, setSelectedSound, getCustomSoundPath, setCustomSoundPath, previewSound, preloadSelected } from '../services/notification-sound'
+import { SOUND_OPTIONS, getSelectedSound, setSelectedSound, previewSound, preloadSelected, listCustomSounds, addCustomSound, removeCustomSound, CustomSound } from '../services/notification-sound'
 import { getAutoReconnect, setAutoReconnect } from '../utils/connection-settings'
 import { getSpeechEngineSetting, setSpeechEngineSetting, SpeechEngineKind } from '../services/speech-engine'
+import { listCustomStatuses, addCustomStatus, removeCustomStatus, DEFAULT_STATUS_EMOJI, CustomStatus } from '../utils/custom-statuses'
+import EmojiPicker from './EmojiPicker'
 
 interface Props {
   onClose: () => void
@@ -54,33 +56,62 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
   const [autoAwayMin, setAutoAwayMinState] = useState(getAutoAwayMinutes)
   const [showNotifSound, setShowNotifSound] = useState(false)
   const [notifSound, setNotifSound] = useState(getSelectedSound)
-  const [customName, setCustomName] = useState(() => {
-    const p = getCustomSoundPath(); return p ? p.split(/[\\/]/).pop() || '' : ''
-  })
+  // Saved custom sound files (the legacy single custom is migrated into the
+  // list on first read)
+  const [customSounds, setCustomSounds] = useState<CustomSound[]>(listCustomSounds)
   const [notifSoundMsg, setNotifSoundMsg] = useState('')
 
-  const pickCustomSound = async () => {
-    // A previously-chosen custom file is re-selected with one click (no
-    // dialog). Clicking again while already selected browses for a new file.
-    if (notifSound !== 'custom' && getCustomSoundPath()) {
-      setSelectedSound('custom')
-      setNotifSound('custom')
-      setNotifSoundMsg('')
-      preloadSelected()
-      return
-    }
+  // Browse for a new custom sound file, save it to the list and select it
+  const handleAddCustomSound = async () => {
     const r = await window.electronAPI.pickFile()
     if (r.cancelled || !r.success || !r.filePath) return
     if (!/\.(wav|mp3|ogg|m4a)$/i.test(r.filePath)) {
       setNotifSoundMsg('Please choose a .wav, .mp3, .ogg or .m4a file.')
       return
     }
-    setCustomSoundPath(r.filePath)
-    setSelectedSound('custom')
-    setNotifSound('custom')
-    setCustomName(r.filePath.split(/[\\/]/).pop() || 'custom')
+    const id = addCustomSound(r.filePath)
+    setCustomSounds(listCustomSounds())
+    setSelectedSound(id)
+    setNotifSound(id)
     setNotifSoundMsg('')
-    void previewSound('custom')
+    void previewSound(id)
+  }
+
+  // Delete a saved custom sound. removeCustomSound() falls the stored
+  // selection back to 'classic' when the deleted one was selected.
+  const handleDeleteCustomSound = (id: string) => {
+    removeCustomSound(id)
+    setCustomSounds(listCustomSounds())
+    setNotifSound(getSelectedSound())
+  }
+
+  // --- Custom statuses (Settings → Statuses) ---
+  const [showStatuses, setShowStatuses] = useState(false)
+  const [customStatuses, setCustomStatuses] = useState<CustomStatus[]>(listCustomStatuses)
+  const [newStatusLabel, setNewStatusLabel] = useState('')
+  const [newStatusEmoji, setNewStatusEmoji] = useState(DEFAULT_STATUS_EMOJI)
+  const [statusEmojiPickerOpen, setStatusEmojiPickerOpen] = useState(false)
+  const [statusMsg, setStatusMsg] = useState('')
+
+  const handleAddStatus = () => {
+    if (!newStatusLabel.trim()) {
+      setStatusMsg('Type a status first.')
+      return
+    }
+    const created = addCustomStatus(newStatusLabel, newStatusEmoji)
+    if (!created) {
+      setStatusMsg('That status already exists.')
+      return
+    }
+    setCustomStatuses(listCustomStatuses())
+    setNewStatusLabel('')
+    setNewStatusEmoji(DEFAULT_STATUS_EMOJI)
+    setStatusMsg('')
+  }
+
+  const handleDeleteStatus = (id: string) => {
+    removeCustomStatus(id)
+    setCustomStatuses(listCustomStatuses())
   }
   const [autoReconnect, setAutoReconnectState] = useState(getAutoReconnect)
   const [speechEngine, setSpeechEngineState] = useState<SpeechEngineKind>(getSpeechEngineSetting)
@@ -339,6 +370,84 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
 
           <div className="setting-divider" />
 
+          {/* Custom statuses — saved per device, shown in the status dropdown
+              alongside the presets. Plain statuses only: never TTS/auto-mic. */}
+          <button
+            className="setting-item"
+            onClick={() => setShowStatuses(!showStatuses)}
+            aria-expanded={showStatuses}
+            aria-label="Custom status settings"
+          >
+            <span className="setting-icon" aria-hidden="true">🏷️</span>
+            <span>Statuses</span>
+            <span className="expand-icon" aria-hidden="true">{showStatuses ? '▼' : '▶'}</span>
+          </button>
+          {showStatuses && (
+            <div className="tts-settings-panel">
+              <div className="tts-info" style={{ marginBottom: 10 }}>
+                Save your own statuses — they appear in the status dropdown
+                next to the built-in ones. Built-in statuses can't be deleted.
+              </div>
+              <div className="custom-status-add">
+                <button
+                  type="button"
+                  className="custom-status-emoji-btn"
+                  onClick={() => setStatusEmojiPickerOpen(true)}
+                  aria-label="Choose status emoji"
+                  title="Choose an emoji"
+                >
+                  {newStatusEmoji}
+                </button>
+                <input
+                  type="text"
+                  className="custom-status-label-input"
+                  placeholder="New status…"
+                  maxLength={40}
+                  value={newStatusLabel}
+                  onChange={(e) => { setNewStatusLabel(e.target.value); if (statusMsg) setStatusMsg('') }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddStatus() }}
+                  aria-label="New custom status label"
+                />
+                <button
+                  type="button"
+                  className="test-btn custom-status-add-btn"
+                  onClick={handleAddStatus}
+                  aria-label="Add custom status"
+                >
+                  Add
+                </button>
+              </div>
+              {statusMsg && <div className="tts-info" style={{ marginTop: 6 }}>{statusMsg}</div>}
+              {customStatuses.length > 0 && (
+                <div className="custom-status-list">
+                  {customStatuses.map((s) => (
+                    <div key={s.id} className="custom-status-row">
+                      <span className="status-emoji" aria-hidden="true">{s.emoji}</span>
+                      <span className="custom-status-name">{s.label}</span>
+                      <button
+                        type="button"
+                        className="notif-sound-delete"
+                        onClick={() => handleDeleteStatus(s.id)}
+                        aria-label={`Delete status ${s.label}`}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {statusEmojiPickerOpen && (
+            <EmojiPicker
+              title="Pick a status emoji"
+              onPick={(emoji) => { setNewStatusEmoji(emoji); setStatusEmojiPickerOpen(false) }}
+              onClose={() => setStatusEmojiPickerOpen(false)}
+            />
+          )}
+
+          <div className="setting-divider" />
+
           {/* Notification sound — plays for incoming messages when unmuted and
               not in a speech status (Talk to me / Listen only) */}
           <button
@@ -358,7 +467,8 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
                 "Talk to me"/"Listen only" status (those read messages aloud).
               </div>
               <div className="notif-sound-list">
-                {SOUND_OPTIONS.map((opt) => (
+                {/* Classic + the 10 bundled sounds */}
+                {SOUND_OPTIONS.filter((opt) => opt.kind !== 'none').map((opt) => (
                   <div key={opt.id} className={`notif-sound-row ${notifSound === opt.id ? 'selected' : ''}`}>
                     <button
                       type="button"
@@ -368,24 +478,52 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
                       <span className="notif-sound-check">{notifSound === opt.id ? '✓' : ''}</span>
                       {opt.label}
                     </button>
-                    {opt.kind !== 'none' && (
-                      <button type="button" className="notif-sound-play" onClick={() => previewSound(opt.id)} aria-label={`Preview ${opt.label}`}>▶</button>
-                    )}
+                    <button type="button" className="notif-sound-play" onClick={() => previewSound(opt.id)} aria-label={`Preview ${opt.label}`}>▶</button>
                   </div>
                 ))}
-                <div className={`notif-sound-row ${notifSound === 'custom' ? 'selected' : ''}`}>
+
+                {/* Saved custom sound files */}
+                {customSounds.map((cs) => (
+                  <div key={cs.id} className={`notif-sound-row custom ${notifSound === cs.id ? 'selected' : ''}`}>
+                    <button
+                      type="button"
+                      className="notif-sound-pick"
+                      onClick={() => { setNotifSound(cs.id); setSelectedSound(cs.id); preloadSelected() }}
+                      title={cs.path}
+                    >
+                      <span className="notif-sound-check">{notifSound === cs.id ? '✓' : ''}</span>
+                      <span className="notif-sound-name">{cs.name}</span>
+                    </button>
+                    <button type="button" className="notif-sound-play" onClick={() => previewSound(cs.id)} aria-label={`Preview ${cs.name}`}>▶</button>
+                    <button type="button" className="notif-sound-delete" onClick={() => handleDeleteCustomSound(cs.id)} aria-label={`Delete ${cs.name}`}>✕</button>
+                  </div>
+                ))}
+
+                {/* None (silent) */}
+                {SOUND_OPTIONS.filter((opt) => opt.kind === 'none').map((opt) => (
+                  <div key={opt.id} className={`notif-sound-row ${notifSound === opt.id ? 'selected' : ''}`}>
+                    <button
+                      type="button"
+                      className="notif-sound-pick"
+                      onClick={() => { setNotifSound(opt.id); setSelectedSound(opt.id); preloadSelected() }}
+                    >
+                      <span className="notif-sound-check">{notifSound === opt.id ? '✓' : ''}</span>
+                      {opt.label}
+                    </button>
+                  </div>
+                ))}
+
+                {/* Browse for a new custom file — saved to the list above */}
+                <div className="notif-sound-row">
                   <button
                     type="button"
                     className="notif-sound-pick"
-                    onClick={pickCustomSound}
-                    title={customName && notifSound === 'custom' ? 'Click to choose a different file' : undefined}
+                    onClick={handleAddCustomSound}
+                    aria-label="Add custom sound file"
                   >
-                    <span className="notif-sound-check">{notifSound === 'custom' ? '✓' : ''}</span>
-                    {customName ? `Custom: ${customName}` : 'Custom… (browse)'}
+                    <span className="notif-sound-check"></span>
+                    ➕ Add custom… (browse)
                   </button>
-                  {customName && (
-                    <button type="button" className="notif-sound-play" onClick={() => previewSound('custom')} aria-label="Preview custom sound">▶</button>
-                  )}
                 </div>
               </div>
               {notifSoundMsg && <div className="tts-info" style={{ marginTop: 8 }}>{notifSoundMsg}</div>}

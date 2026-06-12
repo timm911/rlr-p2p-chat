@@ -87,6 +87,13 @@
   outline-offset: -2px;
 }
 
+/* The menu can grow with saved custom statuses — scroll inside the 390x670
+   window instead of overflowing it */
+.status-menu {
+  max-height: 420px;
+  overflow-y: auto;
+}
+
 .custom-status-input {
   padding: 12px 16px;
   border: none;
