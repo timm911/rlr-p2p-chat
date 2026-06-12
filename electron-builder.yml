@@ -40,15 +40,17 @@ win:
   # To support Windows 8.1: npm install electron@21.4.4 --save-dev
 nsis:
   oneClick: false
-  allowToChangeInstallationDirectory: true
+  # Install per-user into %LOCALAPPDATA%\Programs (no admin) so auto-updates
+  # apply silently with NO UAC prompt — unattended updates work when away.
   perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: false
   createDesktopShortcut: always
   createStartMenuShortcut: true
   shortcutName: RLR P2P Chat
   installerIcon: build/icons/icon.ico
   uninstallerIcon: build/icons/icon.ico
   installerHeaderIcon: build/icons/icon.ico
-  allowElevation: true
   deleteAppDataOnUninstall: false
 portable:
   artifactName: ${productName}-Portable-${version}.${ext}
