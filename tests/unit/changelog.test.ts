@@ -1,6 +1,7 @@
 /**
- * Unit tests for the "What's new" changelog helpers: version comparison and
- * the "which versions to show after an update" logic.
+ * Unit tests for the changelog helpers behind the Release Notes viewer:
+ * version comparison, the "which versions are newer than X" logic, and the
+ * seed data (full version history, newest first).
  */
 import {
   CHANGELOG,
@@ -63,9 +64,20 @@ describe('entriesToShow', () => {
 })
 
 describe('CHANGELOG seed data', () => {
-  it('has a 2.15.0 entry, newest first', () => {
-    expect(CHANGELOG[0].version).toBe('2.15.0')
-    expect(CHANGELOG[0].items.length).toBeGreaterThanOrEqual(8)
+  it('has the 2.16.0 release-notes entry first', () => {
+    expect(CHANGELOG[0].version).toBe('2.16.0')
+    expect(CHANGELOG[0].items.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('keeps the 2.15.0 feature-drop entry', () => {
+    const entry = CHANGELOG.find((e) => e.version === '2.15.0')
+    expect(entry).toBeDefined()
+    expect(entry!.items.length).toBeGreaterThanOrEqual(8)
+  })
+
+  it('reaches back to 2.0.0 so the viewer shows the full history', () => {
+    expect(CHANGELOG[CHANGELOG.length - 1].version).toBe('2.0.0')
+    expect(CHANGELOG.length).toBeGreaterThanOrEqual(11)
   })
 
   it('is sorted newest first', () => {

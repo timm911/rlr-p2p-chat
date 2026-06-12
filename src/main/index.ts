@@ -13,6 +13,60 @@ if (process.env.RLR_USER_DATA) {
 
 let mainWindow: BrowserWindow | null = null
 
+// Custom application menu: mirrors the standard Electron menu (full Edit
+// roles, View, Window) and adds Help → "Release Notes", which tells the
+// renderer to open the in-app version-history viewer.
+function setupApplicationMenu(): void {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'File',
+      submenu: [{ role: 'quit', label: 'Exit' }]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'delete' },
+        { type: 'separator' },
+        { role: 'selectAll' }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    },
+    {
+      label: 'Window',
+      submenu: [{ role: 'minimize' }, { role: 'close' }]
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Release Notes',
+          click: () => mainWindow?.webContents.send('menu:show-release-notes')
+        }
+      ]
+    }
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
 function createWindow(): void {
   // Restore last-used position/size (validated against current displays)
   const restored = getRestoredWindowOptions()
@@ -154,6 +208,7 @@ ipcMain.handle('window:open-external', async (_event, url: string) => {
 app.whenReady().then(() => {
   app.setAppUserModelId('com.rlr.p2pchat')
 
+  setupApplicationMenu()
   createWindow()
 
   app.on('activate', function () {

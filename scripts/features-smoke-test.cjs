@@ -8,10 +8,10 @@
  *      actually delivered to the peer. (The stored sendAt is rewound to
  *      ~now+2s via localStorage so the test doesn't wait 15 minutes; the
  *      ChatWindow timer reads storage as the source of truth.)
- *   3. "What's new" popup — appears when the stored last-seen version is
- *      older than the current version, OK dismisses it and updates
- *      last-seen, and "Don't show again" suppresses it on reload. A fresh
- *      install (no stored version) shows nothing.
+ *   3. Release notes viewer — nothing EVER auto-appears on launch (the old
+ *      "What's new" popup is gone, even with app data present and no
+ *      last-seen version stored). Settings → "Release notes" opens a panel
+ *      listing the FULL version history (current 2.16.0 down to 2.0.0).
  *
  * Prereq: `npm run build`
  * Run:    node scripts/features-smoke-test.cjs
@@ -77,11 +77,11 @@ async function main() {
     await ripster.page.waitForSelector('.status-dot.connected', { timeout: 30000 })
     console.log('PASS: both instances connected')
 
-    // Fresh install: no "What's new" modal (no stored last-seen version)
-    if (await jupiter.page.locator('.whats-new-overlay').count()) {
-      fail('what\'s-new modal appeared on a fresh install')
+    // No modal ever auto-appears on launch (the old "What's new" popup is gone)
+    if (await jupiter.page.locator('.whats-new-overlay, .release-notes-overlay').count()) {
+      fail('a modal auto-appeared on a fresh launch')
     }
-    console.log('PASS: no what\'s-new modal on fresh install')
+    console.log('PASS: no auto modal on a fresh launch')
 
     // Mute both sides so the default "Talk to me" status doesn't start
     // TTS/auto-mic voice flows during the test
@@ -171,57 +171,50 @@ async function main() {
     await jupiter.page.waitForSelector('.scheduled-bar', { state: 'detached', timeout: 10000 })
     console.log('PASS: scheduled indicator cleared after sending')
 
-    // ============ 3) "What's new" modal ============
-    // Simulate an update: pretend the user last saw 2.14.0, then reload
+    // ============ 3) Release notes viewer (no auto popup) ============
+    // The old "What's new" auto-popup is gone. Even the case that used to
+    // trigger it (app data present, no last-seen version stored — i.e. an
+    // existing install right after an update) must show NOTHING on launch.
     await jupiter.page.evaluate(() => {
-      localStorage.setItem('rlrchat-whats-new-last-seen', '2.14.0')
-    })
-    await jupiter.page.reload()
-    await jupiter.page.waitForSelector('.whats-new-overlay', { timeout: 15000 })
-    const title = await jupiter.page.locator('#whats-new-title').textContent()
-    if (!title.includes(`v${APP_VERSION}`)) fail(`modal title missing current version (got: "${title}")`)
-    const body = await jupiter.page.locator('.whats-new-panel').textContent()
-    for (const expected of ['Voice calls', 'emoji picker', 'Schedule messages', 'Read receipts']) {
-      if (!body.includes(expected)) fail(`what's-new body missing "${expected}"`)
-    }
-    console.log(`PASS: what's-new modal appeared for v${APP_VERSION} with the 2.15.0 items`)
-
-    // OK dismisses and updates last-seen
-    await jupiter.page.click('button[aria-label="Close what\'s new"]')
-    await jupiter.page.waitForSelector('.whats-new-overlay', { state: 'detached', timeout: 5000 })
-    const lastSeen = await jupiter.page.evaluate(() => localStorage.getItem('rlrchat-whats-new-last-seen'))
-    if (lastSeen !== APP_VERSION) fail(`OK did not update last-seen (got: "${lastSeen}")`)
-    console.log('PASS: OK dismissed the modal and stored the current version as last-seen')
-
-    // Reload with last-seen current → no modal
-    await jupiter.page.reload()
-    await jupiter.page.waitForSelector('.app-container', { timeout: 15000 })
-    await jupiter.page.waitForTimeout(2500)
-    if (await jupiter.page.locator('.whats-new-overlay').count()) {
-      fail('modal reappeared even though last-seen is current')
-    }
-    console.log('PASS: modal does not reappear once the version has been seen')
-
-    // "Don't show again": rewind last-seen, check the box, OK → suppressed forever
-    await jupiter.page.evaluate(() => {
-      localStorage.setItem('rlrchat-whats-new-last-seen', '2.14.0')
-    })
-    await jupiter.page.reload()
-    await jupiter.page.waitForSelector('.whats-new-overlay', { timeout: 15000 })
-    await jupiter.page.check('.whats-new-dont-show input')
-    await jupiter.page.click('button[aria-label="Close what\'s new"]')
-    await jupiter.page.waitForSelector('.whats-new-overlay', { state: 'detached', timeout: 5000 })
-
-    await jupiter.page.evaluate(() => {
-      localStorage.setItem('rlrchat-whats-new-last-seen', '2.14.0') // rewind again
+      localStorage.removeItem('rlrchat-whats-new-last-seen')
+      localStorage.removeItem('rlrchat-whats-new-suppressed')
     })
     await jupiter.page.reload()
     await jupiter.page.waitForSelector('.app-container', { timeout: 15000 })
     await jupiter.page.waitForTimeout(2500)
-    if (await jupiter.page.locator('.whats-new-overlay').count()) {
-      fail('"Don\'t show again" did not suppress the modal on reload')
+    if (await jupiter.page.locator('.whats-new-overlay, .release-notes-overlay').count()) {
+      fail('a modal auto-appeared after reload (app data present, last-seen unset)')
     }
-    console.log('PASS: "Don\'t show again" suppresses the modal even after an update')
+    console.log('PASS: no auto popup after reload, even with app data and no last-seen version')
+
+    // Auto-resume reconnects jupiter back into the chat window
+    await jupiter.page.waitForSelector('.chat-window', { timeout: 30000 })
+    await jupiter.page.waitForSelector('.status-dot.connected', { timeout: 30000 })
+
+    // Settings → "Release notes" opens the on-demand viewer with the FULL history
+    await jupiter.page.click('button[aria-label="Open settings menu"]')
+    await jupiter.page.waitForSelector('.settings-menu', { timeout: 5000 })
+    await jupiter.page.click('button[aria-label="View release notes"]')
+    await jupiter.page.waitForSelector('.release-notes-overlay', { timeout: 5000 })
+    const notes = await jupiter.page.locator('.release-notes-panel').textContent()
+    if (!notes.includes(`Current version: v${APP_VERSION}`)) {
+      fail(`release notes missing current version line (got: "${notes.slice(0, 200)}…")`)
+    }
+    for (const v of [`v${APP_VERSION}`, 'v2.15.0', 'v2.9.0', 'v2.0.0']) {
+      if (!notes.includes(v)) fail(`release notes missing version "${v}"`)
+    }
+    for (const item of ['Release notes viewer', 'Voice calls', 'AES-256']) {
+      if (!notes.includes(item)) fail(`release notes missing item "${item}"`)
+    }
+    console.log(`PASS: Settings → Release notes lists the full history (v${APP_VERSION} … v2.0.0)`)
+
+    // Close button dismisses the viewer (Settings stays open underneath)
+    await jupiter.page.click('button[aria-label="Close release notes"]')
+    await jupiter.page.waitForSelector('.release-notes-overlay', { state: 'detached', timeout: 5000 })
+    if (!(await jupiter.page.locator('.settings-menu').count())) {
+      fail('settings menu closed when the release notes viewer was dismissed')
+    }
+    console.log('PASS: closing release notes returns to the Settings menu')
 
     console.log('\nFEATURES SMOKE TEST PASSED')
   } finally {

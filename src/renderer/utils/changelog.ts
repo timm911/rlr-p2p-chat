@@ -1,10 +1,10 @@
 /**
- * "What's new" changelog shown after an auto-update.
+ * Version history shown in the on-demand Release Notes viewer
+ * (ReleaseNotes.tsx, opened from Settings or Help → Release Notes).
  *
- * CHANGELOG is newest-first. WhatsNew.tsx compares the running app version
- * (update:get-version) against the last version the user saw and shows every
- * entry in between. Pure helpers (compareVersions / entriesToShow) are unit
- * tested in tests/unit/changelog.test.ts.
+ * CHANGELOG is newest-first and lists every user-facing release. Pure helpers
+ * (compareVersions / entriesToShow) are unit tested in
+ * tests/unit/changelog.test.ts.
  */
 
 export interface ChangelogEntry {
@@ -13,6 +13,13 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '2.16.0',
+    items: [
+      '📋 Release notes viewer (see version history any time in Settings)',
+      '🔕 Removed the auto popup after updates'
+    ]
+  },
   {
     version: '2.15.0',
     items: [
@@ -28,7 +35,48 @@ export const CHANGELOG: ChangelogEntry[] = [
   },
   {
     version: '2.14.0',
-    items: ['🛠️ Stability and reconnect fixes']
+    items: ['🔔 Notification sound picker (10 sounds + custom)']
+  },
+  {
+    version: '2.13.0',
+    items: ['⬇️ Per-user install so updates apply with no admin/UAC prompt']
+  },
+  {
+    version: '2.11.0',
+    items: [
+      '📅 Date dividers & message search',
+      '💤 Auto-away when idle',
+      '🎙️ Voice messages'
+    ]
+  },
+  {
+    version: '2.10.0',
+    items: ["🔄 Manual 'Check for updates' button"]
+  },
+  {
+    version: '2.9.0',
+    items: [
+      '🔒 Encrypted chat history & saved password at rest',
+      '✍️ Spell-check',
+      '🔠 Adjustable text size',
+      '💬 Status now persists across restarts'
+    ]
+  },
+  {
+    version: '2.8.0',
+    items: ['⬆️ Automatic updates over the internet']
+  },
+  {
+    version: '2.6.0',
+    items: ['🔇 Mute button for sounds & speech']
+  },
+  {
+    version: '2.4.0',
+    items: ['🗣️ Natural neural voices (Alan, Joe, Ryan, and more)']
+  },
+  {
+    version: '2.0.0',
+    items: ['🔐 End-to-end AES-256 encryption for all messages, files & calls']
   }
 ]
 
@@ -45,9 +93,9 @@ export function compareVersions(a: string, b: string): number {
 }
 
 /**
- * Which changelog entries to show after an update: everything newer than the
- * last-seen version, up to and including the current version (newest first).
- * A missing last-seen version means a fresh install — show nothing.
+ * Which changelog entries are newer than a previously seen version, up to and
+ * including the current version (newest first). A missing last-seen version
+ * means a fresh install — show nothing.
  */
 export function entriesToShow(
   changelog: ChangelogEntry[],
@@ -63,37 +111,4 @@ export function entriesToShow(
         compareVersions(e.version, currentVersion) <= 0
     )
     .sort((a, b) => compareVersions(b.version, a.version))
-}
-
-// --- Per-device persistence (localStorage) ---
-
-const LAST_SEEN_KEY = 'rlrchat-whats-new-last-seen'
-const SUPPRESS_KEY = 'rlrchat-whats-new-suppressed'
-
-export function getLastSeenVersion(): string | null {
-  try {
-    return localStorage.getItem(LAST_SEEN_KEY)
-  } catch (_) {
-    return null
-  }
-}
-
-export function setLastSeenVersion(version: string): void {
-  try {
-    localStorage.setItem(LAST_SEEN_KEY, version)
-  } catch (_) {}
-}
-
-export function isWhatsNewSuppressed(): boolean {
-  try {
-    return localStorage.getItem(SUPPRESS_KEY) === '1'
-  } catch (_) {
-    return false
-  }
-}
-
-export function setWhatsNewSuppressed(suppressed: boolean): void {
-  try {
-    localStorage.setItem(SUPPRESS_KEY, suppressed ? '1' : '0')
-  } catch (_) {}
 }

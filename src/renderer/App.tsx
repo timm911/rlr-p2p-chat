@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import UserSelection from './components/UserSelection'
 import ConnectionSetup from './components/ConnectionSetup'
 import ChatWindow from './components/ChatWindow'
-import WhatsNew from './components/WhatsNew'
+import ReleaseNotes from './components/ReleaseNotes'
 import { getSavedConnectionMeta, getSavedIdentity, saveIdentity } from './utils/connection-settings'
 import './styles/App.css'
 
@@ -37,6 +37,20 @@ function App() {
     port: savedConn?.port ?? 8082
   })
   const [updateNotice, setUpdateNotice] = useState<string | null>(null)
+  const [showReleaseNotes, setShowReleaseNotes] = useState(false)
+
+  // On-demand Release Notes viewer (never auto-shown). Opened from the
+  // Settings menu (DOM event, dispatched by SettingsMenu) or from the native
+  // Help → "Release Notes" menu item (IPC from the main process).
+  useEffect(() => {
+    const open = () => setShowReleaseNotes(true)
+    window.addEventListener('rlr:show-release-notes', open)
+    const offMenu = window.electronAPI.onShowReleaseNotes(open)
+    return () => {
+      window.removeEventListener('rlr:show-release-notes', open)
+      offMenu()
+    }
+  }, [])
 
   // Surface auto-update progress so users know the app is updating/restarting
   useEffect(() => {
@@ -89,8 +103,8 @@ function App() {
 
   return (
     <div className={`app-container ${currentScreen === 'chat' ? 'fullscreen' : ''}`}>
-      {/* "What's new" popup — appears once after an auto-update */}
-      <WhatsNew />
+      {/* Release notes — only when the user asks for them */}
+      {showReleaseNotes && <ReleaseNotes onClose={() => setShowReleaseNotes(false)} />}
       {updateNotice && (
         <div className="update-notice" role="status" aria-live="polite">
           🔄 {updateNotice}

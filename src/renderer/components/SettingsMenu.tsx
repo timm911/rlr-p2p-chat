@@ -256,6 +256,17 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
             )}
           </div>
 
+          {/* Opens the full version-history viewer (rendered at the App level
+              so the Help menu can open the same panel) */}
+          <button
+            className="setting-item"
+            onClick={() => window.dispatchEvent(new Event('rlr:show-release-notes'))}
+            aria-label="View release notes"
+          >
+            <span className="setting-icon" aria-hidden="true">📋</span>
+            <span>Release notes</span>
+          </button>
+
           <div className="setting-divider" />
 
           <button className="setting-item" onClick={handleReconnect} aria-label="Change connection settings">
