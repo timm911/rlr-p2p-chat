@@ -25,6 +25,7 @@ export type CallEndReason =
   | 'no-answer'      // our outgoing call rang out (~30s)
   | 'mic-error'      // getUserMedia / audio pipeline failure
   | 'disconnected'   // the chat connection dropped mid-call
+  | 'answered-elsewhere' // a ring we were sharing was answered on another device
 
 export interface CallStateInfo {
   reason?: CallEndReason
@@ -138,6 +139,16 @@ class VoiceCallService {
   endLocal(reason: CallEndReason = 'disconnected'): void {
     if (this.state === 'idle') return
     this.teardown(reason)
+  }
+
+  /**
+   * Stop ringing because the caller's call was answered on another device
+   * (group chat: a call rings all of someone's machines; the first to answer
+   * wins, the rest stop). No-op unless we're currently ringing.
+   */
+  answeredElsewhere(): void {
+    if (this.state !== 'ringing') return
+    this.teardown('answered-elsewhere')
   }
 
   /** Mute the mic: capture keeps running but no frames are sent. */

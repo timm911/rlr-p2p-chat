@@ -1060,3 +1060,29 @@
 .image-lightbox-close:hover {
   background: rgba(255, 255, 255, 0.35);
 }
+
+/* Reconnect feedback: a brief highlight pulse on the connection log instead of
+   a beep. Lasts ~2s then fades. */
+@keyframes reconnect-pulse {
+  0%   { background: rgba(74, 222, 128, 0.45); }
+  100% { background: rgba(74, 222, 128, 0); }
+}
+.connection-log-wrap.reconnected-flash {
+  animation: reconnect-pulse 2.2s ease-out;
+  border-radius: 8px;
+}
+.reconnect-flash-tag {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #064e3b;
+  background: #4ade80;
+  animation: reconnect-tag-fade 2.2s ease-out forwards;
+}
+@keyframes reconnect-tag-fade {
+  0%   { opacity: 1; }
+  70%  { opacity: 1; }
+  100% { opacity: 0; }
+}

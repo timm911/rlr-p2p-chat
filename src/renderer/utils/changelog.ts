@@ -14,6 +14,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '3.0.3',
+    items: [
+      '📞 Calling rings both of a person\'s computers — whoever answers first connects, the others stop ringing',
+      '🔕 No more reconnect beep — the connection log flashes briefly instead'
+    ]
+  },
+  {
     version: '3.0.2',
     items: [
       '🟢 Live online dots — each person shows green only while actually connected (a sleeping/closed machine no longer looks online)',

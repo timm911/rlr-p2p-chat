@@ -124,6 +124,9 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
   const [unreadCount, setUnreadCount] = useState(0)
   const [connectionLog, setConnectionLog] = useState<Array<{ message: string; detail?: string }>>([])
+  // Brief visual "Reconnected" flash on the connection log (replaces the old
+  // reconnect beep, which was annoying)
+  const [reconnectFlash, setReconnectFlash] = useState(false)
   // Voice auto-response state
   const [isTTSSpeaking, setIsTTSSpeaking] = useState(false)
   const [isVoiceResponseMode, setIsVoiceResponseMode] = useState(false)
@@ -535,6 +538,9 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
           case 'disconnected':
             if (wasInCall) addSystemMessage(`Call ended — connection lost (${duration})`)
             break
+          case 'answered-elsewhere':
+            addSystemMessage('Call answered on another device')
+            break
         }
         callStartTimeRef.current = 0
       }
@@ -920,7 +926,22 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
       } else if (msg.type === 'call-request') {
         getVoiceCall().handlePeerRequest()
       } else if (msg.type === 'call-accept') {
+        // If WE placed this call (we were ringing everyone), the first accept
+        // wins — tell the other ringing machines to stop. A call rings all of
+        // someone's devices; only the one that answered should connect.
+        const wasCaller = getVoiceCall().getState() === 'calling'
         getVoiceCall().handlePeerAccept()
+        if (wasCaller) {
+          void window.electronAPI.sendMessage({
+            type: 'call-taken',
+            payload: {},
+            timestamp: Date.now()
+          })
+        }
+      } else if (msg.type === 'call-taken') {
+        // Someone answered on another device — stop ringing here (no-op if
+        // we're the one who answered, since we're already in-call).
+        getVoiceCall().answeredElsewhere()
       } else if (msg.type === 'call-decline') {
         getVoiceCall().handlePeerDecline()
       } else if (msg.type === 'call-end') {
@@ -935,8 +956,10 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
 
       if (state === 'connected') {
         if (wasDisconnectedRef.current) {
-          soundService.play('reconnect')
+          // No beep — just flash the connection log briefly
           wasDisconnectedRef.current = false
+          setReconnectFlash(true)
+          setTimeout(() => { if (mounted) setReconnectFlash(false) }, 2200)
         }
         setIsConnected(true)
         // Re-broadcast my current status so peers re-sync after either side
@@ -2267,8 +2290,11 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
         </div>
       )}
 
-      <details className="connection-log-wrap no-drag">
-        <summary>Connection log</summary>
+      <details className={`connection-log-wrap no-drag ${reconnectFlash ? 'reconnected-flash' : ''}`}>
+        <summary>
+          Connection log
+          {reconnectFlash && <span className="reconnect-flash-tag">🔌 Reconnected</span>}
+        </summary>
         <div className="connection-log" role="log">
           {connectionLog.length === 0 ? (
             <div className="connection-log-line connection-log-empty">
