@@ -78,8 +78,10 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
   const [myStatus, setMyStatus] = useState<Status>(() => {
     try { return (localStorage.getItem('rlrchat-my-status') as Status) || 'Talk to me' } catch { return 'Talk to me' }
   })
-  const [peerStatus, setPeerStatus] = useState<Status>(() => {
-    try { return (localStorage.getItem('rlrchat-peer-status') as Status) || 'Talk to me' } catch { return 'Talk to me' }
+  // Status of each OTHER person in the group, keyed by identity. The header
+  // lists everyone by name with their own status underneath.
+  const [peerStatuses, setPeerStatuses] = useState<Record<string, Status>>(() => {
+    try { return JSON.parse(localStorage.getItem('rlrchat-peer-statuses') || '{}') } catch { return {} }
   })
   const [isConnected, setIsConnected] = useState(true)
   const [replyTarget, setReplyTarget] = useState<{ id: string; from: string; snippet: string } | null>(null)
@@ -134,6 +136,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
   // the history-sync request fired on reconnect)
   const messagesRef = useRef<Message[]>([])
   const myStatusRef = useRef<Status>(myStatus)
+  const peerStatusesRef = useRef<Record<string, Status>>(peerStatuses)
   const lastSendTimeRef = useRef<number>(0)
   const speechLastResultRef = useRef<string>('')
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -171,6 +174,13 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
   // Actual message attribution uses each message's own `from` (group chat),
   // with peerName only as a fallback when an older payload omits it.
   const peerName = userIdentity === 'Ripster' ? 'Group' : 'Ripster'
+  // Everyone else in the 3-way chat, in display order — each shown by name with
+  // their own status in the header.
+  const otherIdentities: string[] = (
+    userIdentity === 'Ripster' ? ['RLRJupiter', 'Ramjet']
+      : userIdentity === 'RLRJupiter' ? ['Ripster', 'Ramjet']
+        : ['Ripster', 'RLRJupiter']
+  )
   const soundService = getSoundService()
   const [isMuted, setIsMuted] = useState(() => soundService.isMuted())
 
@@ -235,10 +245,11 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
     try { localStorage.setItem('rlrchat-my-status', myStatus) } catch {}
   }, [myStatus])
 
-  // Remember the peer's last-known status across restarts
+  // Remember each peer's last-known status across restarts
   useEffect(() => {
-    try { localStorage.setItem('rlrchat-peer-status', peerStatus) } catch {}
-  }, [peerStatus])
+    peerStatusesRef.current = peerStatuses
+    try { localStorage.setItem('rlrchat-peer-statuses', JSON.stringify(peerStatuses)) } catch {}
+  }, [peerStatuses])
 
   // Keep a ref of listening state for synchronous guards in async handlers
   useEffect(() => {
@@ -763,12 +774,11 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
         // its current status to re-sync; if it's unchanged, stay quiet so we
         // don't spam duplicate "changed status to X" lines.
         const statusFrom = msg.payload.from || peerName
-        setPeerStatus(prev => {
-          if (prev !== msg.payload.status) {
-            addSystemMessage(`${statusFrom} changed status to ${msg.payload.status}`)
-          }
-          return msg.payload.status
-        })
+        const newStatus = msg.payload.status
+        if (peerStatusesRef.current[statusFrom] !== newStatus) {
+          addSystemMessage(`${statusFrom} changed status to ${newStatus}`)
+        }
+        setPeerStatuses(prev => ({ ...prev, [statusFrom]: newStatus }))
       } else if (msg.type === 'reaction') {
         // Handle incoming reaction from peer (add)
         setMessages(prev => prev.map(message => {
@@ -2105,13 +2115,16 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
       {/* Header */}
       <div className="chat-header">
         <div className="peer-section no-drag">
-          <div className="peer-avatar">{peerName[0]}</div>
-          <div className="peer-info">
-            <div className="peer-name">{peerName}</div>
-            <div className="connection-status">
-              <span className={`status-dot ${isConnected ? 'connected' : 'disconnected'}`} />
-              {isConnected ? peerStatus : 'Disconnected'}
-            </div>
+          <div className="peer-info peer-list">
+            {otherIdentities.map((name) => (
+              <div className={`peer-row ${name.toLowerCase()}`} key={name}>
+                <div className="peer-name">{name}</div>
+                <div className="connection-status">
+                  <span className={`status-dot ${isConnected ? 'connected' : 'disconnected'}`} />
+                  {isConnected ? (peerStatuses[name] || '—') : 'Disconnected'}
+                </div>
+              </div>
+            ))}
             {(peerTyping || isTTSSpeaking) && (
               <div className="header-status-extra" role="status">
                 {isTTSSpeaking && <span className="tts-indicator">🔊 Reading…</span>}

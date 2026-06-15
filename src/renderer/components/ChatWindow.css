@@ -47,6 +47,28 @@
   margin-bottom: 3px;
 }
 
+/* Per-person status list in the header: each name stacked with its own status
+   underneath. Compact so two (or three) people fit in the header. */
+.peer-list {
+  gap: 6px;
+}
+.peer-row {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+.peer-row .peer-name {
+  font-size: 14px;
+  margin-bottom: 1px;
+}
+.peer-row .connection-status {
+  font-size: 12px;
+}
+/* Tint each name to match its message-bubble accent color */
+.peer-row.rlrjupiter .peer-name { color: #38bdf8; }
+.peer-row.ramjet .peer-name { color: #f59e0b; }
+.peer-row.ripster .peer-name { color: #c4b5fd; }
+
 .header-status-extra {
   display: flex;
   flex-wrap: wrap;

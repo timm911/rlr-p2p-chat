@@ -14,6 +14,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '3.0.0',
+    items: [
+      '👥 Three-way group chat — new "Ramjet" identity so you can run two computers at once',
+      '🔄 History sync — pick up the conversation from your other computer, nothing missed',
+      '🖼️ Tap an image to view it full-size (zoom to read screenshots)',
+      '🎨 Each person\'s messages are color-coded so you can tell who sent what',
+      '📊 Header shows everyone by name with their own status'
+    ]
+  },
+  {
     version: '2.17.0',
     items: [
       '🏷️ Add & delete your own custom statuses',
