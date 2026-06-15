@@ -31,6 +31,7 @@ interface Props {
   userIdentity: 'RLRJupiter' | 'Ramjet' | 'Ripster'
   connectionConfig: { host: string; port: number }
   onDisconnect: () => void
+  onLogoff: () => void
 }
 
 export interface Message {
@@ -70,7 +71,7 @@ export interface Message {
 
 export type Status = 'Talk to me' | 'Listen only' | 'BRB' | 'Bed' | 'Dinner' | 'TV' | 'Away' | 'Company' | string
 
-function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
+function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputText, setInputText] = useState('')
   // Persist statuses so they survive a restart/auto-update (otherwise my own
@@ -83,6 +84,9 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
   const [peerStatuses, setPeerStatuses] = useState<Record<string, Status>>(() => {
     try { return JSON.parse(localStorage.getItem('rlrchat-peer-statuses') || '{}') } catch { return {} }
   })
+  // Who is actually online right now (derived from presence heartbeats). Starts
+  // empty every launch — presence is live state, never restored from disk.
+  const [onlinePeers, setOnlinePeers] = useState<Set<string>>(new Set())
   const [isConnected, setIsConnected] = useState(true)
   const [replyTarget, setReplyTarget] = useState<{ id: string; from: string; snippet: string } | null>(null)
   const [isShaking, setIsShaking] = useState(false)
@@ -137,6 +141,9 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
   const messagesRef = useRef<Message[]>([])
   const myStatusRef = useRef<Status>(myStatus)
   const peerStatusesRef = useRef<Record<string, Status>>(peerStatuses)
+  // Last time we heard anything from each identity (presence beats + any
+  // message carrying `from`). Used to drive the per-person online dot.
+  const lastSeenRef = useRef<Record<string, number>>({})
   const lastSendTimeRef = useRef<number>(0)
   const speechLastResultRef = useRef<string>('')
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -250,6 +257,42 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
     peerStatusesRef.current = peerStatuses
     try { localStorage.setItem('rlrchat-peer-statuses', JSON.stringify(peerStatuses)) } catch {}
   }, [peerStatuses])
+
+  // Presence: broadcast a small heartbeat so others know we're alive, and
+  // recompute who is online from the last time we heard from each person. A
+  // person goes offline ~70s after their last beat (≈ two missed heartbeats),
+  // which is how an asleep/closed machine stops showing a green dot.
+  useEffect(() => {
+    const BEAT_MS = 25000
+    const OFFLINE_AFTER = 70000
+    const beat = () => {
+      if (!isConnectedRef.current) return
+      window.electronAPI.sendMessage({
+        type: 'presence',
+        payload: { from: userIdentity },
+        timestamp: Date.now()
+      }).catch(() => {})
+    }
+    const recompute = () => {
+      const now = Date.now()
+      const next = new Set<string>()
+      for (const [id, t] of Object.entries(lastSeenRef.current)) {
+        if (now - t < OFFLINE_AFTER) next.add(id)
+      }
+      setOnlinePeers(prev => {
+        if (prev.size === next.size && [...prev].every(x => next.has(x))) return prev
+        return next
+      })
+    }
+    const startup = setTimeout(beat, 1500)
+    const beatTimer = setInterval(beat, BEAT_MS)
+    const recomputeTimer = setInterval(recompute, 5000)
+    return () => {
+      clearTimeout(startup)
+      clearInterval(beatTimer)
+      clearInterval(recomputeTimer)
+    }
+  }, [userIdentity])
 
   // Keep a ref of listening state for synchronous guards in async handlers
   useEffect(() => {
@@ -706,6 +749,10 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
     const handleMessage = async (msg: any) => {
       if (!mounted) return
 
+      // Presence: any message carrying a sender means that person is alive now.
+      const fromId = msg.payload?.from
+      if (fromId && fromId !== userIdentity) lastSeenRef.current[fromId] = Date.now()
+
       if (msg.type === 'chat') {
         // Group chat: attribute to the actual sender carried in the payload.
         const senderName = msg.payload.from || peerName
@@ -922,11 +969,21 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
             timestamp: Date.now()
           })
         }
+        // Announce our presence immediately so peers light up our dot fast
+        void window.electronAPI.sendMessage({
+          type: 'presence',
+          payload: { from: userIdentity },
+          timestamp: Date.now()
+        })
         // Deliver anything queued while we were disconnected, in order
         void flushPendingQueue()
       } else if (state === 'disconnected') {
         wasDisconnectedRef.current = true
         setIsConnected(false)
+        // We can't see anyone while our own link is down — clear presence so no
+        // stale green dots linger.
+        lastSeenRef.current = {}
+        setOnlinePeers(new Set())
         // A call can't outlive its transport — tear it down cleanly
         getVoiceCall().endLocal('disconnected')
         console.log('[Connection] Disconnected from peer')
@@ -2116,15 +2173,18 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
       <div className="chat-header">
         <div className="peer-section no-drag">
           <div className="peer-info peer-list">
-            {otherIdentities.map((name) => (
-              <div className={`peer-row ${name.toLowerCase()}`} key={name}>
-                <div className="peer-name">{name}</div>
-                <div className="connection-status">
-                  <span className={`status-dot ${isConnected ? 'connected' : 'disconnected'}`} />
-                  {isConnected ? (peerStatuses[name] || '—') : 'Disconnected'}
+            {otherIdentities.map((name) => {
+              const online = isConnected && onlinePeers.has(name)
+              return (
+                <div className={`peer-row ${name.toLowerCase()}`} key={name}>
+                  <div className="peer-name">{name}</div>
+                  <div className="connection-status">
+                    <span className={`status-dot ${online ? 'connected' : 'disconnected'}`} />
+                    {online ? (peerStatuses[name] || '—') : 'Offline'}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
             {(peerTyping || isTTSSpeaking) && (
               <div className="header-status-extra" role="status">
                 {isTTSSpeaking && <span className="tts-indicator">🔊 Reading…</span>}
@@ -2233,6 +2293,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
             setTimeout(() => inputRef.current?.focus(), 0)
           }}
           onReconnect={onDisconnect}
+          onLogoff={onLogoff}
         />
       )}
 

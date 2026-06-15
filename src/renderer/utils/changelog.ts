@@ -14,6 +14,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '3.0.2',
+    items: [
+      '🟢 Live online dots — each person shows green only while actually connected (a sleeping/closed machine no longer looks online)',
+      '🚪 Log off button (Settings) returns you to the identity screen'
+    ]
+  },
+  {
     version: '3.0.0',
     items: [
       '👥 Three-way group chat — new "Ramjet" identity so you can run two computers at once',

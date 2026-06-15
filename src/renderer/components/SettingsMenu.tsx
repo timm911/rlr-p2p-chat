@@ -18,6 +18,7 @@ import EmojiPicker from './EmojiPicker'
 interface Props {
   onClose: () => void
   onReconnect: () => void
+  onLogoff: () => void
 }
 
 interface TTSConfig {
@@ -27,7 +28,7 @@ interface TTSConfig {
   enabled: boolean
 }
 
-function SettingsMenu({ onClose, onReconnect }: Props) {
+function SettingsMenu({ onClose, onReconnect, onLogoff }: Props) {
   const [ttsConfig, setTtsConfig] = useState<TTSConfig>({
     voice: null,
     speed: 1.0,
@@ -155,6 +156,12 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
   const handleReconnect = () => {
     onClose()
     onReconnect()
+  }
+
+  const handleLogoff = () => {
+    if (!window.confirm('Log off and return to the identity screen? This disconnects the chat.')) return
+    onClose()
+    onLogoff()
   }
 
   const handleOpenDevTools = () => {
@@ -303,6 +310,11 @@ function SettingsMenu({ onClose, onReconnect }: Props) {
           <button className="setting-item" onClick={handleReconnect} aria-label="Change connection settings">
             <span className="setting-icon" aria-hidden="true">🔄</span>
             <span>Change Connection</span>
+          </button>
+
+          <button className="setting-item" onClick={handleLogoff} aria-label="Log off and return to identity selection">
+            <span className="setting-icon" aria-hidden="true">🚪</span>
+            <span>Log off</span>
           </button>
 
           <div className="setting-item">

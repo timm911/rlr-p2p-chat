@@ -64,8 +64,8 @@ describe('entriesToShow', () => {
 })
 
 describe('CHANGELOG seed data', () => {
-  it('has the 2.17.0 custom statuses & sounds entry first', () => {
-    expect(CHANGELOG[0].version).toBe('2.17.0')
+  it('has the latest 3.0.x entry first', () => {
+    expect(CHANGELOG[0].version).toBe('3.0.2')
     expect(CHANGELOG[0].items.length).toBeGreaterThanOrEqual(2)
   })
 

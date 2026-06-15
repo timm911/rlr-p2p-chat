@@ -101,6 +101,16 @@ function App() {
     setCurrentScreen('connection-setup')
   }
 
+  // Log off: drop the connection and go all the way back to identity selection.
+  // Saved host/port/password are kept so logging back in is quick.
+  const handleLogoff = () => {
+    setAutoConnect(false)
+    void window.electronAPI.stopClient().catch(() => {})
+    void window.electronAPI.stopServer().catch(() => {})
+    setUserIdentity(null)
+    setCurrentScreen('user-selection')
+  }
+
   return (
     <div className={`app-container ${currentScreen === 'chat' ? 'fullscreen' : ''}`}>
       {/* Release notes — only when the user asks for them */}
@@ -128,6 +138,7 @@ function App() {
           userIdentity={userIdentity!}
           connectionConfig={connectionConfig}
           onDisconnect={handleBackToConnection}
+          onLogoff={handleLogoff}
         />
       )}
     </div>
