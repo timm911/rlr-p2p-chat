@@ -2,7 +2,7 @@
 import { createHash } from 'crypto'
 
 export interface ProtocolMessage {
-  type: 'chat' | 'chat-ack' | 'status' | 'reaction' | 'reaction-remove' | 'typing' | 'ping' | 'pong' | 'file-offer' | 'file-accept' | 'file-reject' | 'file-chunk' | 'file-complete' | 'file-cancel' | 'file-pause' | 'file-resume' | 'auth' | 'auth-success' | 'auth-failed' | 'hello' | 'call-request' | 'call-accept' | 'call-decline' | 'call-end' | 'call-audio' | 'read-receipt' | 'nudge' | 'app-version'
+  type: 'chat' | 'chat-ack' | 'status' | 'reaction' | 'reaction-remove' | 'typing' | 'ping' | 'pong' | 'file-offer' | 'file-accept' | 'file-reject' | 'file-chunk' | 'file-complete' | 'file-cancel' | 'file-pause' | 'file-resume' | 'auth' | 'auth-success' | 'auth-failed' | 'hello' | 'call-request' | 'call-accept' | 'call-decline' | 'call-end' | 'call-audio' | 'read-receipt' | 'nudge' | 'app-version' | 'history-request' | 'history-response'
   payload: any
   timestamp: number
 }

@@ -3,7 +3,7 @@ import { getSavedConnectionMeta, getSavedPassword, saveConnection } from '../uti
 import './ConnectionSetup.css'
 
 interface Props {
-  userIdentity: 'RLRJupiter' | 'Ripster'
+  userIdentity: 'RLRJupiter' | 'Ramjet' | 'Ripster'
   initialConfig: { host: string; port: number }
   onConnect: (config: { host: string; port: number; password: string }) => void
   autoConnect?: boolean
@@ -23,7 +23,8 @@ function ConnectionSetup({ userIdentity, initialConfig, onConnect, autoConnect }
   const latestConfigRef = useRef({ host, port, password })
   const onConnectRef = useRef(onConnect)
 
-  const isConnector = userIdentity === 'RLRJupiter'
+  // Both RLRJupiter and Ramjet dial out to Ripster (the listener/hub).
+  const isConnector = userIdentity !== 'Ripster'
 
   useEffect(() => {
     const off = window.electronAPI.onConnectionLog((entry) => {
@@ -160,7 +161,7 @@ function ConnectionSetup({ userIdentity, initialConfig, onConnect, autoConnect }
   return (
     <div className="connection-setup glass">
       <h1 className="title">
-        {isConnector ? 'Connect to Ripster' : 'Waiting for RLRJupiter...'}
+        {isConnector ? 'Connect to Ripster' : 'Waiting for connections...'}
       </h1>
 
       {isConnector ? (

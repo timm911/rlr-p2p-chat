@@ -6,21 +6,40 @@ import { generateSalt, deriveKey, isEncryptedLine, encryptMessage, decryptMessag
 import { appendLog } from '../debug-log'
 // #endregion
 
+/**
+ * Application message types the hub forwards to every OTHER connected peer so a
+ * 3-way group chat works (the two connectors have no direct link to each other
+ * — Ripster relays between them). Calls stay 1:1 (not relayed peer-to-peer),
+ * and transport/handshake/history-sync messages are never relayed.
+ */
+const RELAY_TYPES = new Set<ProtocolMessage['type']>([
+  'chat', 'chat-ack', 'status', 'typing', 'reaction', 'reaction-remove',
+  'file-offer', 'file-accept', 'file-reject', 'file-chunk', 'file-complete',
+  'file-cancel', 'file-pause', 'file-resume', 'nudge', 'read-receipt', 'app-version'
+])
+
+interface PeerConn {
+  id: string
+  socket: Socket
+  buffer: string
+  isAuthenticated: boolean
+  sessionKey: Buffer | null // AES-256-GCM key derived per connection
+  lastActivityTime: number
+  authTimer: NodeJS.Timeout | null
+  rejected: boolean
+}
+
 export class TCPServer extends EventEmitter {
   private server: Server | null = null
-  private client: Socket | null = null
+  private clients: Map<string, PeerConn> = new Map()
+  private nextId = 1
   private port: number
-  private buffer: string = ''
   private heartbeatTimer: NodeJS.Timeout | null = null
-  private heartbeatInterval: number = 30000 // Send heartbeat every 30 seconds
-  private lastActivityTime: number = Date.now()
   private connectionCheckTimer: NodeJS.Timeout | null = null
+  private heartbeatInterval: number = 30000 // Send heartbeat every 30 seconds
   private staleConnectionTimeout: number = 75000 // Dead after 2.5 missed heartbeat intervals
-  private password: string
-  private isAuthenticated: boolean = false
-  private authTimer: NodeJS.Timeout | null = null
   private authTimeout: number = 15000 // 15 seconds to authenticate
-  private sessionKey: Buffer | null = null // AES-256-GCM key derived per connection
+  private password: string
 
   constructor(port: number, password: string) {
     super()
@@ -39,127 +58,108 @@ export class TCPServer extends EventEmitter {
 
       this.server.on('connection', (socket: Socket) => {
         const clientAddr = `${socket.remoteAddress}:${socket.remotePort}`
-        console.log(`[TCP Server] Client connected: ${clientAddr}`)
+        const id = `c${this.nextId++}`
+        console.log(`[TCP Server] Client connected: ${clientAddr} (${id})`)
         // #region agent log
         this.emit('log', { message: 'Client connected', detail: clientAddr })
         appendLog({ sessionId: '3352dc', hypothesisId: 'H4', location: 'tcp-server.ts:connection', message: 'Client connected', data: { clientAddr } })
         // #endregion
 
-        // Disconnect existing client if any. Its close/error events fire
-        // asynchronously AFTER we set up the new connection below, so every
-        // handler must check `this.client === socket` before touching shared
-        // state — otherwise the old socket's close wipes the new session's
-        // key and the reconnecting peer gets a bogus "Invalid password".
-        if (this.client) {
-          console.log('[TCP Server] Disconnecting previous client')
-          this.stopHeartbeat() // old session's heartbeat; new one starts after auth
-          this.client.destroy()
+        const peer: PeerConn = {
+          id,
+          socket,
+          buffer: '',
+          isAuthenticated: false,
+          sessionKey: null,
+          lastActivityTime: Date.now(),
+          authTimer: null,
+          rejected: false
         }
-
-        this.client = socket
-        this.buffer = ''
-        this.lastActivityTime = Date.now()
-        this.isAuthenticated = false // Reset auth state
-
-        console.log('[TCP Server] Waiting for authentication...')
+        this.clients.set(id, peer)
 
         socket.setEncoding('utf8')
-
-        // Enable TCP keepalive to detect dead connections
         socket.setKeepAlive(true, 20000) // Probe after 20s idle: detects dead peers sooner, keeps NAT entries fresh
         socket.setNoDelay(true) // Disable Nagle's algorithm for real-time chat
         socket.setTimeout(90000) // Detect stale sockets faster than OS keepalive
 
-        // Start auth timeout - disconnect if not authenticated in time
-        this.startAuthTimeout()
-
-        // Begin encrypted-session handshake: derive a fresh key for this
+        // Begin encrypted-session handshake: derive a fresh key for THIS
         // connection and tell the peer the salt. The hello line is the only
         // plaintext the server ever sends besides auth-failed.
         const salt = generateSalt()
-        this.sessionKey = deriveKey(this.password, salt)
+        peer.sessionKey = deriveKey(this.password, salt)
         socket.write(encodeMessage({ type: 'hello', payload: { salt, v: 1 }, timestamp: Date.now() }))
 
-        // One rejection per connection: a scanner sending an HTTP request (or
-        // a wrong-password client) produces many bad lines; rejecting each one
-        // spams the log and writes into a socket already being destroyed.
-        let rejectedThisConnection = false
+        // Disconnect if not authenticated in time
+        peer.authTimer = setTimeout(() => {
+          if (!peer.isAuthenticated) {
+            console.warn(`[TCP Server] Auth timeout (${id}) - disconnecting`)
+            this.emit('log', { message: 'Auth timeout', detail: 'disconnecting' })
+            socket.destroy()
+          }
+        }, this.authTimeout)
+
         const rejectOnce = (reason: string) => {
-          if (rejectedThisConnection) return
-          rejectedThisConnection = true
-          this.rejectUnauthenticated(reason)
+          if (peer.rejected) return
+          peer.rejected = true
+          this.rejectUnauthenticated(peer, reason)
         }
 
         socket.on('data', (data: string) => {
-          if (this.client !== socket) return // stale socket; already replaced
-          this.lastActivityTime = Date.now()
-          this.buffer += data
-          const lines = this.buffer.split('\n')
+          peer.lastActivityTime = Date.now()
+          peer.buffer += data
+          const lines = peer.buffer.split('\n')
+          peer.buffer = lines.pop() || '' // keep the last incomplete line
 
-          // Keep the last incomplete line in buffer
-          this.buffer = lines.pop() || ''
-
-          // Process complete lines
           for (const line of lines) {
             if (!line.trim()) continue
-            if (rejectedThisConnection) return // draining a rejected peer
+            if (peer.rejected) return // draining a rejected peer
 
             if (!isEncryptedLine(line)) {
               // Plaintext from a peer is never valid (wrong app version or a
               // port scanner). Reject before auth; ignore after.
-              if (!this.isAuthenticated) rejectOnce('Encryption required')
+              if (!peer.isAuthenticated) rejectOnce('Encryption required')
               continue
             }
 
-            const msg = this.sessionKey ? decryptMessage(this.sessionKey, line) : null
+            const msg = peer.sessionKey ? decryptMessage(peer.sessionKey, line) : null
             if (!msg) {
               // GCM auth failure: wrong password (different key) or tampering
-              console.warn('[TCP Server] Failed to decrypt incoming line')
-              if (!this.isAuthenticated) {
-                rejectOnce('Invalid password')
-              } else {
-                socket.destroy()
-              }
+              console.warn(`[TCP Server] Failed to decrypt incoming line (${id})`)
+              if (!peer.isAuthenticated) rejectOnce('Invalid password')
+              else socket.destroy()
               continue
             }
 
-            console.log(`[TCP Server] Received:`, msg.type)
-            this.handleMessage(msg)
+            console.log(`[TCP Server] Received (${id}):`, msg.type)
+            this.handleMessage(peer, msg)
           }
         })
 
         socket.on('error', (err) => {
-          if (this.client !== socket) return // stale socket; already replaced
-          console.error('[TCP Server] Socket error:', err.message)
+          console.error(`[TCP Server] Socket error (${id}):`, err.message)
           this.emit('error', err)
         })
 
         socket.on('timeout', () => {
-          console.warn('[TCP Server] Client socket timeout, closing stale connection')
+          console.warn(`[TCP Server] Client socket timeout (${id}), closing stale connection`)
           socket.destroy()
         })
 
         socket.on('close', () => {
-          if (this.client !== socket) {
-            // This close belongs to a connection that was already replaced by
-            // a newer one — do NOT clear the new session's state (doing so
-            // wiped the fresh session key and made valid reconnects fail with
-            // "Invalid password").
-            console.log('[TCP Server] Stale socket closed (already replaced)')
-            return
-          }
-          console.log('[TCP Server] Client disconnected')
+          const wasAuthed = peer.isAuthenticated
+          if (peer.authTimer) { clearTimeout(peer.authTimer); peer.authTimer = null }
+          this.clients.delete(id)
+          console.log(`[TCP Server] Client disconnected (${id}); ${this.clients.size} remaining`)
           // #region agent log
-          this.emit('log', { message: 'Client closed', detail: this.isAuthenticated ? 'was authenticated' : 'before auth' })
-          appendLog({ sessionId: '3352dc', hypothesisId: 'H4', location: 'tcp-server.ts:close', message: 'Client closed', data: { wasAuthenticated: this.isAuthenticated } })
+          this.emit('log', { message: 'Client closed', detail: wasAuthed ? 'was authenticated' : 'before auth' })
+          appendLog({ sessionId: '3352dc', hypothesisId: 'H4', location: 'tcp-server.ts:close', message: 'Client closed', data: { wasAuthenticated: wasAuthed } })
           // #endregion
-          this.client = null
-          this.buffer = ''
-          this.isAuthenticated = false
-          this.sessionKey = null
-          this.stopHeartbeat()
-          this.stopAuthTimeout()
-          this.emit('disconnected')
+          // Only surface "disconnected" to the UI when the LAST peer leaves —
+          // otherwise one connector dropping would falsely mark Ripster offline.
+          if (wasAuthed && this.authedCount() === 0) {
+            this.stopHeartbeat()
+            this.emit('disconnected')
+          }
         })
       })
 
@@ -184,232 +184,179 @@ export class TCPServer extends EventEmitter {
 
   stop(): void {
     console.log('[TCP Server] Stopping')
-
     this.stopHeartbeat()
-    this.stopAuthTimeout()
-
-    if (this.client) {
-      this.client.destroy()
-      this.client = null
+    for (const peer of this.clients.values()) {
+      if (peer.authTimer) clearTimeout(peer.authTimer)
+      peer.socket.destroy()
     }
-
+    this.clients.clear()
     if (this.server) {
-      this.server.close(() => {
-        console.log('[TCP Server] Stopped')
-      })
+      this.server.close(() => console.log('[TCP Server] Stopped'))
       this.server = null
     }
-
-    this.buffer = ''
-    this.isAuthenticated = false
-    this.sessionKey = null
     this.emit('stopped')
   }
 
-  send(message: ProtocolMessage): boolean {
-    if (!this.client) {
-      console.warn('[TCP Server] No client connected, cannot send message')
-      return false
-    }
+  private authedCount(): number {
+    let n = 0
+    for (const p of this.clients.values()) if (p.isAuthenticated && !p.socket.destroyed) n++
+    return n
+  }
 
-    if (!this.isAuthenticated && message.type !== 'auth-success' && message.type !== 'auth-failed') {
-      console.warn('[TCP Server] Client not authenticated yet, cannot send:', message.type)
-      return false
-    }
-
-    if (!this.sessionKey) {
-      console.warn('[TCP Server] No session key, cannot send:', message.type)
-      return false
-    }
-
+  /** Send a message to a single peer (used for directed replies, e.g. history). */
+  private sendTo(peer: PeerConn, message: ProtocolMessage): boolean {
+    if (!peer.isAuthenticated && message.type !== 'auth-success' && message.type !== 'auth-failed') return false
+    if (!peer.sessionKey || peer.socket.destroyed) return false
     try {
-      const encoded = encryptMessage(this.sessionKey, message)
-      this.client.write(encoded)
-      console.log(`[TCP Server] Sent:`, message.type)
+      peer.socket.write(encryptMessage(peer.sessionKey, message))
       return true
     } catch (err) {
-      console.error('[TCP Server] Failed to send message:', err)
+      console.error(`[TCP Server] Failed to send to ${peer.id}:`, err)
       return false
     }
+  }
+
+  /** Broadcast to every authenticated peer (optionally excluding one). */
+  send(message: ProtocolMessage, exceptId?: string): boolean {
+    let any = false
+    for (const peer of this.clients.values()) {
+      if (peer.id === exceptId) continue
+      if (this.sendTo(peer, message)) any = true
+    }
+    if (!any) console.warn('[TCP Server] No authenticated peers, cannot send:', message.type)
+    return any
   }
 
   /**
    * Reject an unauthenticated peer with a plaintext auth-failed line.
-   * Plaintext is required here: a wrong-password peer has a different session
-   * key and could not decrypt the rejection otherwise. Carries no secrets.
+   * Plaintext is required: a wrong-password peer has a different session key
+   * and could not decrypt the rejection otherwise. Carries no secrets.
    */
-  private rejectUnauthenticated(reason: string): void {
-    console.warn('[TCP Server] Rejecting unauthenticated peer:', reason)
+  private rejectUnauthenticated(peer: PeerConn, reason: string): void {
+    console.warn(`[TCP Server] Rejecting unauthenticated peer (${peer.id}):`, reason)
     this.emit('log', { message: 'Sending auth-failed', detail: reason })
-    appendLog({ sessionId: '3352dc', hypothesisId: 'H1', location: 'tcp-server.ts:auth-failed-send', message: 'Sending auth-failed' })
     try {
-      this.client?.write(encodeMessage({ type: 'auth-failed', payload: { reason }, timestamp: Date.now() }))
+      peer.socket.write(encodeMessage({ type: 'auth-failed', payload: { reason }, timestamp: Date.now() }))
     } catch (_err) {
       // Socket may already be gone; we are destroying it anyway
     }
-    setTimeout(() => {
-      this.client?.destroy()
-    }, 100)
+    setTimeout(() => peer.socket.destroy(), 100)
   }
 
   isConnected(): boolean {
-    return this.client !== null && !this.client.destroyed && this.isAuthenticated
+    return this.authedCount() > 0
   }
 
   /** Read-only diagnostics for UI (does not modify connection state) */
-  getDiagnostics(): { role: 'server'; connected: boolean; authenticated: boolean; lastActivityTime: number; isConnecting: false } {
+  getDiagnostics(): { role: 'server'; connected: boolean; authenticated: boolean; lastActivityTime: number; isConnecting: false; peers: number } {
+    let lastActivity = 0
+    for (const p of this.clients.values()) if (p.lastActivityTime > lastActivity) lastActivity = p.lastActivityTime
     return {
       role: 'server',
-      connected: this.client !== null && !this.client.destroyed,
-      authenticated: this.isAuthenticated,
-      lastActivityTime: this.lastActivityTime,
-      isConnecting: false
+      connected: this.authedCount() > 0,
+      authenticated: this.authedCount() > 0,
+      lastActivityTime: lastActivity || Date.now(),
+      isConnecting: false,
+      peers: this.authedCount()
     }
   }
 
-  private handleMessage(msg: ProtocolMessage): void {
+  private handleMessage(peer: PeerConn, msg: ProtocolMessage): void {
     // Handle authentication first
     if (msg.type === 'auth') {
       const expectedHash = hashPassword(this.password)
-      const receivedHash = msg.payload.passwordHash
-      const match = receivedHash === expectedHash
-      // #region agent log
+      const match = msg.payload?.passwordHash === expectedHash
       this.emit('log', { message: 'Auth received', detail: match ? 'match' : 'invalid password' })
-      appendLog({ sessionId: '3352dc', hypothesisId: 'H1', location: 'tcp-server.ts:auth', message: 'Auth received', data: { match } })
-      // #endregion
 
       if (match) {
-        console.log('[TCP Server] Authentication successful')
-        this.emit('log', { message: 'Sending auth-success' })
-        appendLog({ sessionId: '3352dc', hypothesisId: 'H1', location: 'tcp-server.ts:auth-success-send', message: 'Sending auth-success' })
-        this.isAuthenticated = true
-        this.stopAuthTimeout()
-
-        // Send success response
-        this.send({ type: 'auth-success', payload: {}, timestamp: Date.now() })
-
-        // Now emit connected event (delayed until auth succeeds)
+        console.log(`[TCP Server] Authentication successful (${peer.id})`)
+        peer.isAuthenticated = true
+        if (peer.authTimer) { clearTimeout(peer.authTimer); peer.authTimer = null }
+        this.sendTo(peer, { type: 'auth-success', payload: {}, timestamp: Date.now() })
         this.emit('connected', {
-          address: this.client?.remoteAddress,
-          port: this.client?.remotePort
+          address: peer.socket.remoteAddress,
+          port: peer.socket.remotePort
         })
-
-        // Start heartbeat after successful auth
-        this.startHeartbeat()
+        this.startHeartbeat() // idempotent
       } else {
-        // In practice unreachable with encryption on (a wrong password means
-        // the auth message never decrypts), but kept as defense in depth.
-        console.warn('[TCP Server] Authentication failed - invalid password')
-        this.rejectUnauthenticated('Invalid password')
+        // Unreachable with encryption on (wrong password → never decrypts), but
+        // kept as defense in depth.
+        console.warn(`[TCP Server] Authentication failed (${peer.id}) - invalid password`)
+        peer.rejected = true
+        this.rejectUnauthenticated(peer, 'Invalid password')
       }
       return
     }
 
     // Block all other messages until authenticated
-    if (!this.isAuthenticated) {
-      console.warn('[TCP Server] Rejecting message - not authenticated yet:', msg.type)
-      if (this.client) {
-        this.client.destroy()
-      }
+    if (!peer.isAuthenticated) {
+      console.warn(`[TCP Server] Rejecting message (${peer.id}) - not authenticated:`, msg.type)
+      peer.socket.destroy()
       return
     }
 
-    // Handle authenticated messages
     switch (msg.type) {
       case 'ping':
-        // Auto-respond to ping with pong
-        this.send({ type: 'pong', payload: {}, timestamp: Date.now() })
-        break
+        this.sendTo(peer, { type: 'pong', payload: {}, timestamp: Date.now() })
+        return // never relayed/forwarded
 
       case 'pong':
         this.emit('message', msg)
-        break
+        return
 
-      case 'chat':
-      case 'chat-ack':
-      case 'status':
-      case 'reaction':
-      case 'reaction-remove':
-      case 'typing':
-      case 'file-offer':
-      case 'file-accept':
-      case 'file-reject':
-      case 'file-chunk':
-      case 'file-complete':
-      case 'file-cancel':
-      case 'file-pause':
-      case 'file-resume':
-        // Forward to renderer
-        this.emit('message', msg)
-        break
+      case 'history-request': {
+        // A (re)connecting peer wants everything it missed. The hub is the
+        // source of truth (it relays the whole conversation), so answer
+        // directly on this socket. handlers.ts loads history.json and replies.
+        const since = msg.payload?.since
+        this.emit('history-request', {
+          since,
+          reply: (messages: any[]) => {
+            this.sendTo(peer, { type: 'history-response', payload: { messages }, timestamp: Date.now() })
+          }
+        })
+        return
+      }
 
       case 'auth-success':
       case 'auth-failed':
-        // Ignore these on server side (only client cares)
-        break
-
-      default:
-        // Forward any other application message type to the renderer. New
-        // feature message types (nudge, reply, read-receipt, call signaling,
-        // call audio, …) only need to be added to the protocol + handled in
-        // the renderer — the transport relays them generically.
-        this.emit('message', msg)
+        return // not meaningful inbound on the server
     }
+
+    // Relay group-chat traffic to the OTHER connected peers (the two connectors
+    // can't see each other directly). Calls and history-sync are not relayed.
+    if (RELAY_TYPES.has(msg.type)) {
+      this.send(msg, peer.id)
+    }
+
+    // Forward to this machine's renderer (and main-process file handling).
+    this.emit('message', msg)
   }
 
   private startHeartbeat(): void {
-    this.stopHeartbeat()
-    
-    // Send periodic pings
+    if (this.heartbeatTimer || this.connectionCheckTimer) return // already running
+
     this.heartbeatTimer = setInterval(() => {
-      if (this.isConnected()) {
-        console.log('[TCP Server] Sending heartbeat ping')
-        this.send({ type: 'ping', payload: {}, timestamp: Date.now() })
+      for (const peer of this.clients.values()) {
+        if (peer.isAuthenticated && !peer.socket.destroyed) {
+          this.sendTo(peer, { type: 'ping', payload: {}, timestamp: Date.now() })
+        }
       }
     }, this.heartbeatInterval)
 
-    // Check connection health based on last network activity.
     this.connectionCheckTimer = setInterval(() => {
-      const timeSinceLastActivity = Date.now() - this.lastActivityTime
-      if (timeSinceLastActivity > this.staleConnectionTimeout) {
-        console.warn('[TCP Server] No activity detected, closing stale connection')
-        if (this.client) {
-          this.client.destroy()
+      const now = Date.now()
+      for (const peer of this.clients.values()) {
+        if (now - peer.lastActivityTime > this.staleConnectionTimeout) {
+          console.warn(`[TCP Server] No activity (${peer.id}), closing stale connection`)
+          peer.socket.destroy()
         }
       }
-    }, 15000) // Check every 15 seconds
+    }, 15000)
   }
 
   private stopHeartbeat(): void {
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer)
-      this.heartbeatTimer = null
-    }
-    if (this.connectionCheckTimer) {
-      clearInterval(this.connectionCheckTimer)
-      this.connectionCheckTimer = null
-    }
-  }
-
-  private startAuthTimeout(): void {
-    this.stopAuthTimeout()
-
-    this.authTimer = setTimeout(() => {
-      if (!this.isAuthenticated && this.client) {
-        console.warn('[TCP Server] Authentication timeout - disconnecting')
-        // #region agent log
-        this.emit('log', { message: 'Auth timeout', detail: 'disconnecting' })
-        appendLog({ sessionId: '3352dc', hypothesisId: 'H4', location: 'tcp-server.ts:auth-timeout', message: 'Auth timeout', data: {} })
-        // #endregion
-        this.client.destroy()
-      }
-    }, this.authTimeout)
-  }
-
-  private stopAuthTimeout(): void {
-    if (this.authTimer) {
-      clearTimeout(this.authTimer)
-      this.authTimer = null
-    }
+    if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null }
+    if (this.connectionCheckTimer) { clearInterval(this.connectionCheckTimer); this.connectionCheckTimer = null }
   }
 }

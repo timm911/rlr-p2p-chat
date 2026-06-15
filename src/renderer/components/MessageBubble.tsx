@@ -22,12 +22,23 @@ interface Props {
   onReply: (message: Message) => void
   /** Open the full emoji picker to react with ANY emoji (➕ button) */
   onOpenReactionPicker?: (messageId: string) => void
+  /** Open the full-screen image viewer (lightbox) for an inline image */
+  onOpenImage?: (dataUrl: string) => void
   showSeen?: boolean
+}
+
+// Per-sender tint class so it's easy to tell who sent what in the group chat
+// (RLRJupiter vs Ramjet vs Ripster). Used on received bubbles.
+function senderClass(from: string): string {
+  if (from === 'RLRJupiter') return 'from-rlrjupiter'
+  if (from === 'Ramjet') return 'from-ramjet'
+  if (from === 'Ripster') return 'from-ripster'
+  return ''
 }
 
 const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '🔥']
 
-function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onReply, onOpenReactionPicker, showSeen }: Props) {
+function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onReply, onOpenReactionPicker, onOpenImage, showSeen }: Props) {
   const [showReactionPicker, setShowReactionPicker] = useState(false)
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null)
   const [audioDataUrl, setAudioDataUrl] = useState<string | null>(null)
@@ -107,7 +118,7 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onRepl
     return (
       <div className={`message-wrapper ${isOwn ? 'sent' : 'received'}`}>
         <div
-          className="message-bubble file-message"
+          className={`message-bubble file-message ${isOwn ? '' : senderClass(message.from)}`}
           onMouseEnter={() => setShowReactionPicker(true)}
           onMouseLeave={() => setShowReactionPicker(false)}
         >
@@ -176,9 +187,13 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onRepl
               <>
                 {imageDataUrl && (
                   <div className="file-inline-image">
-                    <a href={imageDataUrl} target="_blank" rel="noopener noreferrer" className="inline-image-link">
-                      <img src={imageDataUrl} alt={fileTransfer.fileName} className="inline-image-thumb" />
-                    </a>
+                    <img
+                      src={imageDataUrl}
+                      alt={fileTransfer.fileName}
+                      className="inline-image-thumb"
+                      title="Click to view full size"
+                      onClick={() => onOpenImage?.(imageDataUrl)}
+                    />
                   </div>
                 )}
                 {audioDataUrl && (
@@ -224,7 +239,7 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onRepl
   return (
     <div className={`message-wrapper ${isOwn ? 'sent' : 'received'}`}>
       <div
-        className="message-bubble"
+        className={`message-bubble ${isOwn ? '' : senderClass(message.from)}`}
         onMouseEnter={() => setShowReactionPicker(true)}
         onMouseLeave={() => setShowReactionPicker(false)}
       >

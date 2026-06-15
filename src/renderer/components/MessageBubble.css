@@ -341,7 +341,7 @@
   max-height: 240px;
   object-fit: cover;
   display: block;
-  cursor: pointer;
+  cursor: zoom-in;
   transition: transform 0.2s ease;
 }
 
@@ -361,6 +361,23 @@
 /* The pop the user liked — scale the image itself on hover, no blur */
 .inline-image-thumb:hover {
   transform: scale(1.04);
+}
+
+/* Per-sender accents (3-way group chat): a colored left edge + subtle tint so
+   it's easy to tell RLRJupiter (blue) from Ramjet (amber) from Ripster
+   (violet) at a glance. Applied to received bubbles only — your own stay the
+   purple "sent" style. Scoped under .received to beat the base background. */
+.message-wrapper.received .message-bubble.from-rlrjupiter {
+  border-left: 3px solid #38bdf8;
+  background: linear-gradient(165deg, rgba(56, 189, 248, 0.26) 0%, rgba(56, 189, 248, 0.16) 100%);
+}
+.message-wrapper.received .message-bubble.from-ramjet {
+  border-left: 3px solid #f59e0b;
+  background: linear-gradient(165deg, rgba(245, 158, 11, 0.28) 0%, rgba(245, 158, 11, 0.16) 100%);
+}
+.message-wrapper.received .message-bubble.from-ripster {
+  border-left: 3px solid #a78bfa;
+  background: linear-gradient(165deg, rgba(167, 139, 250, 0.26) 0%, rgba(167, 139, 250, 0.16) 100%);
 }
 
 .file-transfer-actions {

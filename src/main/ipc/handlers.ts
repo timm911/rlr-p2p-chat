@@ -15,6 +15,31 @@ let tcpClient: TCPClient | null = null
 let mainWindow: BrowserWindow | null = null
 let fileTransferManager: FileTransferManager | null = null
 
+// Transfers currently streaming chunks. In a group chat the hub broadcasts a
+// file-offer to BOTH connectors, so two file-accepts come back for one
+// transfer — without this guard sendFileChunks would fire twice and send every
+// chunk twice. The first accept starts the (broadcast) send; later ones no-op.
+const activeChunkSends = new Set<string>()
+
+/** Read + decrypt history.json off disk (mirrors the history:load handler). */
+function loadHistoryArrayFrom(p: string): any[] {
+  try {
+    if (!fs.existsSync(p)) return []
+    const MAGIC = 'RLRENC1:'
+    const buf = fs.readFileSync(p)
+    let json: string
+    if (buf.length >= MAGIC.length && buf.subarray(0, MAGIC.length).toString('utf8') === MAGIC) {
+      json = safeStorage.decryptString(buf.subarray(MAGIC.length))
+    } else {
+      json = buf.toString('utf8')
+    }
+    const data = JSON.parse(json)
+    return Array.isArray(data) ? data : []
+  } catch (_) {
+    return []
+  }
+}
+
 export function setupIPCHandlers(window: BrowserWindow): void {
   mainWindow = window
   fileTransferManager = new FileTransferManager()
@@ -123,6 +148,23 @@ export function setupIPCHandlers(window: BrowserWindow): void {
           if (state?.direction === 'send' && (state.status === 'active' || state.status === 'pending')) {
             await sendFileChunks(msg.payload.transferId)
           }
+        }
+      })
+
+      // History sync: a (re)connecting connector asks the hub for everything it
+      // missed. The hub is the source of truth (it relays the whole group
+      // conversation), so answer from its own history.json.
+      tcpServer.on('history-request', ({ since, reply }: { since?: number; reply: (messages: any[]) => void }) => {
+        try {
+          const all = loadHistoryArrayFrom(path.join(app.getPath('userData'), 'history.json'))
+          const filtered = typeof since === 'number'
+            ? all.filter((m: any) => (m?.timestamp || 0) > since)
+            : all
+          // Don't ship system/queued noise back; only real content keeps in sync
+          const clean = filtered.filter((m: any) => m?.type === 'chat' || m?.type === 'file')
+          reply(clean)
+        } catch (_) {
+          reply([])
         }
       })
 
@@ -858,6 +900,14 @@ export async function sendFileChunks(transferId: string): Promise<void> {
   const state = fileTransferManager.getTransferState(transferId)
   if (!state || state.direction !== 'send') return
 
+  // Re-entry guard: a group file-offer is accepted by every connected peer, so
+  // this can be invoked once per accept. Only the first invocation streams.
+  if (activeChunkSends.has(transferId)) {
+    console.log('[FileSend] Already streaming', transferId, '- ignoring duplicate accept')
+    return
+  }
+  activeChunkSends.add(transferId)
+
   try {
     // Send chunks one at a time with small delay to avoid overwhelming the
     // connection. A fresh transfer is 'pending' until the first chunk read
@@ -906,6 +956,8 @@ export async function sendFileChunks(transferId: string): Promise<void> {
   } catch (error: any) {
     console.error('Error sending file chunks:', error)
     await fileTransferManager.failTransfer(transferId, error.message)
+  } finally {
+    activeChunkSends.delete(transferId)
   }
 }
 

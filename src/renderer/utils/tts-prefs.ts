@@ -9,8 +9,9 @@ const KEY = 'rlrchat-tts-voice'
 // Sentinel stored when the user explicitly picks "System Default"
 const DEFAULT_SENTINEL = 'default'
 
-export const IDENTITY_DEFAULT_VOICE: Record<'RLRJupiter' | 'Ripster', string> = {
+export const IDENTITY_DEFAULT_VOICE: Record<'RLRJupiter' | 'Ramjet' | 'Ripster', string> = {
   RLRJupiter: 'piper:en_US-joe-medium',
+  Ramjet: 'piper:en_US-joe-medium',
   Ripster: 'piper:en_GB-alan-medium'
 }
 
@@ -33,7 +34,7 @@ export function setSavedVoice(voice: string | null): void {
 }
 
 /** The voice to use on launch for this identity: saved pick, else identity default. */
-export function resolveInitialVoice(identity: 'RLRJupiter' | 'Ripster'): string | null {
+export function resolveInitialVoice(identity: 'RLRJupiter' | 'Ramjet' | 'Ripster'): string | null {
   const saved = getSavedVoice()
   if (saved !== undefined) return saved
   return IDENTITY_DEFAULT_VOICE[identity]

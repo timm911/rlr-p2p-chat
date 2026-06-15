@@ -71,6 +71,10 @@
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 }
 
+.user-avatar.ramjet {
+  background: linear-gradient(135deg, #f6d365 0%, #f59e0b 100%);
+}
+
 .user-avatar.ripster {
   background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
 }

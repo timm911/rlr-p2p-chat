@@ -1,7 +1,7 @@
 import './UserSelection.css'
 
 interface Props {
-  onSelect: (identity: 'RLRJupiter' | 'Ripster') => void
+  onSelect: (identity: 'RLRJupiter' | 'Ramjet' | 'Ripster') => void
 }
 
 function UserSelection({ onSelect }: Props) {
@@ -21,6 +21,19 @@ function UserSelection({ onSelect }: Props) {
         >
           <div className="user-avatar rlr" aria-hidden="true">RJ</div>
           <div className="user-name">RLRJupiter</div>
+          <div className="user-role">Connector</div>
+        </div>
+
+        <div
+          className="user-card clickable"
+          onClick={() => onSelect('Ramjet')}
+          onKeyPress={(e) => e.key === 'Enter' && onSelect('Ramjet')}
+          tabIndex={0}
+          role="button"
+          aria-label="Ramjet - Connector"
+        >
+          <div className="user-avatar ramjet" aria-hidden="true">RM</div>
+          <div className="user-name">Ramjet</div>
           <div className="user-role">Connector</div>
         </div>
 

@@ -28,7 +28,7 @@ import {
 import './ChatWindow.css'
 
 interface Props {
-  userIdentity: 'RLRJupiter' | 'Ripster'
+  userIdentity: 'RLRJupiter' | 'Ramjet' | 'Ripster'
   connectionConfig: { host: string; port: number }
   onDisconnect: () => void
 }
@@ -113,6 +113,9 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
   const [pendingPasteImages, setPendingPasteImages] = useState<string[]>([])
   const [isSending, setIsSending] = useState(false)
   const [peerTyping, setPeerTyping] = useState(false)
+  const [typingFrom, setTypingFrom] = useState<string>('')
+  // Full-screen image viewer (lightbox): the data URL of the image being viewed
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
   const [unreadCount, setUnreadCount] = useState(0)
   const [connectionLog, setConnectionLog] = useState<Array<{ message: string; detail?: string }>>([])
   // Voice auto-response state
@@ -127,6 +130,9 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesAreaRef = useRef<HTMLDivElement>(null)
+  // Live snapshot of messages for use inside long-lived event closures (e.g.
+  // the history-sync request fired on reconnect)
+  const messagesRef = useRef<Message[]>([])
   const myStatusRef = useRef<Status>(myStatus)
   const lastSendTimeRef = useRef<number>(0)
   const speechLastResultRef = useRef<string>('')
@@ -160,7 +166,11 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
   // Show the "no microphone" guidance only once instead of per-message spam
   const micErrorNoticeShownRef = useRef<boolean>(false)
 
-  const peerName = userIdentity === 'RLRJupiter' ? 'Ripster' : 'RLRJupiter'
+  // Display label for "the other side". Connectors (RLRJupiter/Ramjet) only
+  // ever talk to the hub, Ripster; the hub talks to a group of connectors.
+  // Actual message attribution uses each message's own `from` (group chat),
+  // with peerName only as a fallback when an older payload omits it.
+  const peerName = userIdentity === 'Ripster' ? 'Group' : 'Ripster'
   const soundService = getSoundService()
   const [isMuted, setIsMuted] = useState(() => soundService.isMuted())
 
@@ -380,21 +390,21 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
     if (inputText.trim()) {
       window.electronAPI.sendMessage({
         type: 'typing',
-        payload: { isTyping: true },
+        payload: { isTyping: true, from: userIdentity },
         timestamp: Date.now()
       }).catch(() => {})
       typingTimeoutRef.current = setTimeout(() => {
         typingTimeoutRef.current = null
         window.electronAPI.sendMessage({
           type: 'typing',
-          payload: { isTyping: false },
+          payload: { isTyping: false, from: userIdentity },
           timestamp: Date.now()
         }).catch(() => {})
       }, 2000)
     } else {
       window.electronAPI.sendMessage({
         type: 'typing',
-        payload: { isTyping: false },
+        payload: { isTyping: false, from: userIdentity },
         timestamp: Date.now()
       }).catch(() => {})
     }
@@ -593,7 +603,9 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (showScheduler) {
+        if (lightboxUrl) {
+          setLightboxUrl(null)
+        } else if (showScheduler) {
           setShowScheduler(false)
         } else if (showScheduledList) {
           setShowScheduledList(false)
@@ -611,7 +623,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [showScheduler, showScheduledList, showSettings, fileOfferDialog, isListening, replyTarget])
+  }, [lightboxUrl, showScheduler, showScheduledList, showSettings, fileOfferDialog, isListening, replyTarget])
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -648,6 +660,28 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
     return () => clearTimeout(t)
   }, [messages])
 
+  // Keep a live snapshot for event closures (history-sync on reconnect reads it)
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
+
+  // Merge a batch of history messages (from the hub's history-sync reply) into
+  // state, de-duped by id. Used so a machine that was asleep/off catches up on
+  // everything it missed when it reconnects.
+  const mergeHistory = (incoming: any[]) => {
+    if (!Array.isArray(incoming) || incoming.length === 0) return
+    setMessages(prev => {
+      const seen = new Set(prev.map(m => m.id))
+      const additions = incoming
+        .filter((m: any) => m && m.id && !seen.has(m.id) && (m.type === 'chat' || m.type === 'file'))
+        .map((m: any) => ({ ...m, reactions: m.reactions || {} }))
+      if (additions.length === 0) return prev
+      const merged = [...prev, ...additions]
+      merged.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+      return merged
+    })
+  }
+
   // Add initial connection message and setup listeners (only once)
   useEffect(() => {
     // Use a ref or flag to prevent double mounting in React StrictMode
@@ -662,10 +696,12 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
       if (!mounted) return
 
       if (msg.type === 'chat') {
+        // Group chat: attribute to the actual sender carried in the payload.
+        const senderName = msg.payload.from || peerName
         const chatMsg: Message = {
           id: msg.payload.id,
           type: 'chat',
-          from: peerName,
+          from: senderName,
           content: msg.payload.content,
           timestamp: msg.payload.timestamp,
           reactions: {},
@@ -692,7 +728,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
             return n
           })
         }
-        window.electronAPI.notificationShowMessage(peerName, msg.payload.content)
+        window.electronAPI.notificationShowMessage(senderName, msg.payload.content)
 
         // Notification sound: play the selected sound only when NOT in a
         // speech status (those read the message aloud via TTS) — unless TTS is
@@ -726,9 +762,10 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
         // Only announce a genuine change. On reconnect each side re-broadcasts
         // its current status to re-sync; if it's unchanged, stay quiet so we
         // don't spam duplicate "changed status to X" lines.
+        const statusFrom = msg.payload.from || peerName
         setPeerStatus(prev => {
           if (prev !== msg.payload.status) {
-            addSystemMessage(`${peerName} changed status to ${msg.payload.status}`)
+            addSystemMessage(`${statusFrom} changed status to ${msg.payload.status}`)
           }
           return msg.payload.status
         })
@@ -787,6 +824,10 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
         }
       } else if (msg.type === 'typing') {
         setPeerTyping(!!msg.payload?.isTyping)
+        setTypingFrom(msg.payload?.isTyping ? (msg.payload?.from || peerName) : '')
+      } else if (msg.type === 'history-response') {
+        // The hub answered our history-sync request with everything we missed
+        mergeHistory(msg.payload?.messages)
       } else if (msg.type === 'file-offer') {
         soundService.play('file-transfer-started')
         window.electronAPI.notificationShowFileTransfer(peerName, msg.payload.fileName)
@@ -841,19 +882,33 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
           wasDisconnectedRef.current = false
         }
         setIsConnected(true)
-        // Re-broadcast my current status so the peer re-syncs after either
-        // side restarts/reconnects (fixes stale status in the header).
+        // Re-broadcast my current status so peers re-sync after either side
+        // restarts/reconnects (fixes stale status in the header).
         void window.electronAPI.sendMessage({
           type: 'status',
-          payload: { status: myStatusRef.current },
+          payload: { status: myStatusRef.current, from: userIdentity },
           timestamp: Date.now()
         })
-        // Tell the peer our app version — if they're newer, we'll update; if
-        // we're newer, they will (peer-version-triggered out-of-cycle update).
+        // Tell peers our app version — if they're newer, we'll update; if we're
+        // newer, they will (peer-version-triggered out-of-cycle update).
         if (myAppVersionRef.current) {
           void window.electronAPI.sendMessage({
             type: 'app-version',
-            payload: { version: myAppVersionRef.current },
+            payload: { version: myAppVersionRef.current, from: userIdentity },
+            timestamp: Date.now()
+          })
+        }
+        // History sync: connectors ask the hub (Ripster) for everything they
+        // missed while asleep/offline. The hub is the source of truth, so we
+        // request from our newest known message onward and merge the reply.
+        if (userIdentity !== 'Ripster') {
+          let newest = 0
+          for (const m of messagesRef.current) {
+            if ((m.type === 'chat' || m.type === 'file') && (m.timestamp || 0) > newest) newest = m.timestamp
+          }
+          void window.electronAPI.sendMessage({
+            type: 'history-request',
+            payload: { since: newest },
             timestamp: Date.now()
           })
         }
@@ -1025,6 +1080,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
           type: 'chat',
           payload: {
             id: m.id,
+            from: userIdentity,
             content: m.content,
             timestamp: m.timestamp,
             hasLink: m.hasLink,
@@ -1183,10 +1239,10 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
       setSpeechPreview('')
     }
 
-    // Send status change to peer
+    // Send status change to peers
     await window.electronAPI.sendMessage({
       type: 'status',
-      payload: { status: newStatus },
+      payload: { status: newStatus, from: userIdentity },
       timestamp: Date.now()
     })
   }
@@ -1311,6 +1367,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
         type: 'chat',
         payload: {
           id: msg.id,
+          from: userIdentity,
           content: msg.content,
           timestamp: msg.timestamp,
           hasLink: msg.hasLink,
@@ -1872,7 +1929,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
         const msg: Message = {
           id: offer.transferId,
           type: 'file',
-          from: peerName,
+          from: offer.from || peerName,
           content: `Receiving ${offer.fileName}`,
           timestamp: Date.now(),
           fileTransfer: {
@@ -2015,6 +2072,36 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
 
   return (
     <div className={`chat-window ${isShaking ? 'nudge-shake' : ''}`}>
+      {/* Full-screen image viewer (lightbox). Click anywhere or press Esc to
+          close; click the image itself to toggle fit / 100% so small text in a
+          screenshot becomes readable. */}
+      {lightboxUrl && (
+        <div
+          className="image-lightbox no-drag"
+          role="dialog"
+          aria-label="Image viewer"
+          onClick={() => setLightboxUrl(null)}
+        >
+          <button
+            className="image-lightbox-close"
+            onClick={() => setLightboxUrl(null)}
+            aria-label="Close image viewer"
+            title="Close (Esc)"
+          >
+            ✕
+          </button>
+          <img
+            src={lightboxUrl}
+            alt="Full size"
+            className="image-lightbox-img"
+            onClick={(e) => {
+              e.stopPropagation()
+              e.currentTarget.classList.toggle('zoomed')
+            }}
+          />
+        </div>
+      )}
+
       {/* Header */}
       <div className="chat-header">
         <div className="peer-section no-drag">
@@ -2028,7 +2115,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
             {(peerTyping || isTTSSpeaking) && (
               <div className="header-status-extra" role="status">
                 {isTTSSpeaking && <span className="tts-indicator">🔊 Reading…</span>}
-                {peerTyping && <span className="typing-indicator">{peerName} is typing…</span>}
+                {peerTyping && <span className="typing-indicator">{typingFrom || peerName} is typing…</span>}
               </div>
             )}
           </div>
@@ -2359,6 +2446,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect }: Props) {
                 onRemoveReaction={handleRemoveReaction}
                 onReply={handleReply}
                 onOpenReactionPicker={(messageId) => setReactionPickerFor(messageId)}
+                onOpenImage={(url) => setLightboxUrl(url)}
                 showSeen={msg.id === lastSeenOwnId}
               />
             )

@@ -7,7 +7,7 @@ import { getSavedConnectionMeta, getSavedIdentity, saveIdentity } from './utils/
 import './styles/App.css'
 
 type Screen = 'user-selection' | 'connection-setup' | 'chat'
-type UserIdentity = 'RLRJupiter' | 'Ripster' | null
+type UserIdentity = 'RLRJupiter' | 'Ramjet' | 'Ripster' | null
 
 export interface ConnectionConfig {
   host: string
@@ -84,7 +84,7 @@ function App() {
     }
   }, [])
 
-  const handleUserSelected = (identity: 'RLRJupiter' | 'Ripster') => {
+  const handleUserSelected = (identity: 'RLRJupiter' | 'Ramjet' | 'Ripster') => {
     setUserIdentity(identity)
     saveIdentity(identity) // remembered so the app can auto-resume next launch
     setCurrentScreen('connection-setup')
