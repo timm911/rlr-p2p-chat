@@ -132,3 +132,17 @@
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.10);
 }
+
+/* "Post to chat" button in the release-notes header */
+.release-notes-post {
+  margin-left: auto;
+  margin-right: 8px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(124, 58, 237, 0.45);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+.release-notes-post:hover { background: rgba(124, 58, 237, 0.65); }

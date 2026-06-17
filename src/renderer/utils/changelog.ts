@@ -14,6 +14,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '3.2.3',
+    items: [
+      '🎨 Clearer per-person bubble colors — RLRJupiter (blue), Ramjet (amber), Ripster (pink); your own messages use your color so sender vs receiver never match',
+      '📨 "Post to chat" button in Release Notes — drop the version\'s what\'s-new into the chat'
+    ]
+  },
+  {
     version: '3.2.2',
     items: [
       '✏️ Edit & unsend now work anytime on your own messages (removed the 1-minute limit)',

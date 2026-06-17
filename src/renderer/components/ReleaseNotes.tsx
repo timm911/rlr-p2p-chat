@@ -54,6 +54,21 @@ function ReleaseNotes({ onClose }: Props) {
           <h3 id="release-notes-title">📋 Release notes</h3>
           <button
             type="button"
+            className="release-notes-post"
+            onClick={() => {
+              const entry = CHANGELOG.find((e) => e.version === currentVersion) || CHANGELOG[0]
+              if (!entry) return
+              const text = `📋 What's new in v${entry.version}:\n` + entry.items.map((i) => `• ${i}`).join('\n')
+              window.dispatchEvent(new CustomEvent('rlr:post-release-notes', { detail: text }))
+              onClose()
+            }}
+            aria-label="Post these release notes into the chat"
+            title="Post to chat"
+          >
+            📨 Post to chat
+          </button>
+          <button
+            type="button"
             className="release-notes-close"
             onClick={onClose}
             aria-label="Close release notes"

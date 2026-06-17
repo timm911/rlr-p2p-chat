@@ -65,7 +65,7 @@ describe('entriesToShow', () => {
 
 describe('CHANGELOG seed data', () => {
   it('has the latest 3.2.x entry first', () => {
-    expect(CHANGELOG[0].version).toBe('3.2.2')
+    expect(CHANGELOG[0].version).toBe('3.2.3')
     expect(CHANGELOG[0].items.length).toBeGreaterThanOrEqual(2)
   })
 

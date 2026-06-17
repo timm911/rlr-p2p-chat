@@ -830,6 +830,17 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
     return () => { clearTimeout(startup); clearInterval(timer) }
   }, [])
 
+  // "Post to chat" from the Release Notes viewer drops the notes in as a local
+  // system message (visible in your chat; not sent to the others).
+  useEffect(() => {
+    const onPost = (e: Event) => {
+      const text = (e as CustomEvent).detail
+      if (typeof text === 'string' && text) addSystemMessage(text)
+    }
+    window.addEventListener('rlr:post-release-notes', onPost as EventListener)
+    return () => window.removeEventListener('rlr:post-release-notes', onPost as EventListener)
+  }, [])
+
   // Merge a batch of history messages (from the hub's history-sync reply) into
   // state, de-duped by id. Used so a machine that was asleep/off catches up on
   // everything it missed when it reconnects.

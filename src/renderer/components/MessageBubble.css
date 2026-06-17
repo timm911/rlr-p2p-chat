@@ -122,6 +122,19 @@
     inset 0 -10px 18px -8px rgba(0, 0, 0, 0.30);
 }
 
+/* Your OWN messages are tinted by your identity color (vivid), so they never
+   match the lighter received tint of whoever you're talking to. Each person:
+   RLRJupiter = blue, Ramjet = amber, Ripster = violet. */
+.message-wrapper.sent .message-bubble.from-rlrjupiter {
+  background: linear-gradient(165deg, rgba(56, 189, 248, 0.42) 0%, rgba(2, 132, 199, 0.34) 100%);
+}
+.message-wrapper.sent .message-bubble.from-ramjet {
+  background: linear-gradient(165deg, rgba(251, 191, 36, 0.44) 0%, rgba(180, 83, 9, 0.34) 100%);
+}
+.message-wrapper.sent .message-bubble.from-ripster {
+  background: linear-gradient(165deg, rgba(244, 114, 182, 0.44) 0%, rgba(190, 24, 93, 0.34) 100%);
+}
+
 .message-text {
   font-size: 15px;
   line-height: 1.5;
@@ -372,16 +385,16 @@
    (violet) at a glance. Applied to received bubbles only — your own stay the
    purple "sent" style. Scoped under .received to beat the base background. */
 .message-wrapper.received .message-bubble.from-rlrjupiter {
-  border-left: 3px solid #38bdf8;
-  background: linear-gradient(165deg, rgba(56, 189, 248, 0.26) 0%, rgba(56, 189, 248, 0.16) 100%);
+  border-left: 4px solid #38bdf8;
+  background: linear-gradient(165deg, rgba(56, 189, 248, 0.42) 0%, rgba(2, 132, 199, 0.30) 100%);
 }
 .message-wrapper.received .message-bubble.from-ramjet {
-  border-left: 3px solid #f59e0b;
-  background: linear-gradient(165deg, rgba(245, 158, 11, 0.28) 0%, rgba(245, 158, 11, 0.16) 100%);
+  border-left: 4px solid #f59e0b;
+  background: linear-gradient(165deg, rgba(245, 158, 11, 0.44) 0%, rgba(180, 83, 9, 0.30) 100%);
 }
 .message-wrapper.received .message-bubble.from-ripster {
-  border-left: 3px solid #a78bfa;
-  background: linear-gradient(165deg, rgba(167, 139, 250, 0.26) 0%, rgba(167, 139, 250, 0.16) 100%);
+  border-left: 4px solid #f472b6;
+  background: linear-gradient(165deg, rgba(244, 114, 182, 0.44) 0%, rgba(190, 24, 93, 0.30) 100%);
 }
 
 .file-transfer-actions {

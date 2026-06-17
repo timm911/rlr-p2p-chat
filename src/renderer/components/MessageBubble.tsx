@@ -124,7 +124,7 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onRepl
     return (
       <div className={`message-wrapper ${isOwn ? 'sent' : 'received'}`}>
         <div
-          className={`message-bubble file-message ${isOwn ? '' : senderClass(message.from)}`}
+          className={`message-bubble file-message ${senderClass(message.from)}`}
           onMouseEnter={() => setShowReactionPicker(true)}
           onMouseLeave={() => setShowReactionPicker(false)}
         >
@@ -284,7 +284,7 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onRepl
   return (
     <div className={`message-wrapper ${isOwn ? 'sent' : 'received'}`}>
       <div
-        className={`message-bubble ${isOwn ? '' : senderClass(message.from)}`}
+        className={`message-bubble ${senderClass(message.from)}`}
         onMouseEnter={() => setShowReactionPicker(true)}
         onMouseLeave={() => setShowReactionPicker(false)}
       >

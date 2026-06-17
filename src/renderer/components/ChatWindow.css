@@ -67,7 +67,7 @@
 /* Tint each name to match its message-bubble accent color */
 .peer-row.rlrjupiter .peer-name { color: #38bdf8; }
 .peer-row.ramjet .peer-name { color: #f59e0b; }
-.peer-row.ripster .peer-name { color: #c4b5fd; }
+.peer-row.ripster .peer-name { color: #f472b6; }
 
 .header-status-extra {
   display: flex;
