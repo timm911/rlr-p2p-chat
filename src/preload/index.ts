@@ -133,6 +133,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('context-menu:paste-image', handler)
   },
   getFileDataUrl: (filePath: string) => ipcRenderer.invoke('file:get-file-data-url', filePath),
+  screenshotListSources: () => ipcRenderer.invoke('screenshot:list-sources'),
+  screenshotCapture: (sourceId: string) => ipcRenderer.invoke('screenshot:capture', sourceId),
+  saveTempImage: (dataUrl: string) => ipcRenderer.invoke('file:save-temp-image', dataUrl),
   pickFile: () => ipcRenderer.invoke('file:pick-file'),
   sendFile: (filePath: string) => ipcRenderer.invoke('file:send-file', filePath),
   acceptFileTransfer: (offer: any) => ipcRenderer.invoke('file:accept-transfer', offer),
@@ -259,6 +262,9 @@ export interface ElectronAPI {
   secureDecrypt: (b64: string) => Promise<string | null>
   onContextPasteImage: (callback: () => void) => () => void
   getFileDataUrl: (filePath: string) => Promise<{ success: boolean; dataUrl?: string; kind?: 'audio' | 'image'; error?: string }>
+  screenshotListSources: () => Promise<{ id: string; name: string; isScreen: boolean; thumb: string; appIcon: string | null }[]>
+  screenshotCapture: (sourceId: string) => Promise<{ success: boolean; dataUrl?: string; error?: string }>
+  saveTempImage: (dataUrl: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
   pickFile: () => Promise<{ success: boolean; filePath?: string; cancelled?: boolean; error?: string }>
   sendFile: (filePath: string) => Promise<{ success: boolean; transferId?: string; error?: string }>
   acceptFileTransfer: (offer: any) => Promise<{ success: boolean; transferId?: string; cancelled?: boolean; error?: string }>

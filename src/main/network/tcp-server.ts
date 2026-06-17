@@ -16,7 +16,7 @@ const RELAY_TYPES = new Set<ProtocolMessage['type']>([
   'chat', 'chat-ack', 'status', 'typing', 'reaction', 'reaction-remove',
   'file-offer', 'file-accept', 'file-reject', 'file-chunk', 'file-complete',
   'file-cancel', 'file-pause', 'file-resume', 'nudge', 'read-receipt', 'app-version',
-  'presence'
+  'presence', 'edit', 'unsend', 'reminder'
 ])
 
 interface PeerConn {

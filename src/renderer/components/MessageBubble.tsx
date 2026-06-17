@@ -24,8 +24,15 @@ interface Props {
   onOpenReactionPicker?: (messageId: string) => void
   /** Open the full-screen image viewer (lightbox) for an inline image */
   onOpenImage?: (dataUrl: string) => void
+  /** Edit your own recent message (loads it into the input) */
+  onEdit?: (message: Message) => void
+  /** Unsend (remove) your own recent message */
+  onUnsend?: (messageId: string) => void
   showSeen?: boolean
 }
+
+// You can edit/unsend your own chat message for a short window after sending.
+const EDIT_WINDOW_MS = 60000
 
 // Per-sender tint class so it's easy to tell who sent what in the group chat
 // (RLRJupiter vs Ramjet vs Ripster). Used on received bubbles.
@@ -38,7 +45,9 @@ function senderClass(from: string): string {
 
 const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '🔥']
 
-function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onReply, onOpenReactionPicker, onOpenImage, showSeen }: Props) {
+function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onReply, onOpenReactionPicker, onOpenImage, onEdit, onUnsend, showSeen }: Props) {
+  const canEditUnsend = isOwn && message.type === 'chat' && !message.removed &&
+    (Date.now() - message.timestamp < EDIT_WINDOW_MS)
   const [showReactionPicker, setShowReactionPicker] = useState(false)
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null)
   const [audioDataUrl, setAudioDataUrl] = useState<string | null>(null)
@@ -276,6 +285,28 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onRepl
             >
               ↩️
             </button>
+            {canEditUnsend && onEdit && (
+              <button
+                className="emoji-btn edit-btn"
+                onClick={() => onEdit(message)}
+                aria-label="Edit this message"
+                title="Edit (within 1 min)"
+                type="button"
+              >
+                ✏️
+              </button>
+            )}
+            {canEditUnsend && onUnsend && (
+              <button
+                className="emoji-btn unsend-btn"
+                onClick={() => onUnsend(message.id)}
+                aria-label="Unsend this message"
+                title="Unsend (within 1 min)"
+                type="button"
+              >
+                🗑️
+              </button>
+            )}
           </div>
         )}
 
@@ -286,9 +317,16 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onRepl
           </div>
         )}
 
-        <div className="message-text">{linkifyText(message.content)}</div>
+        {message.removed ? (
+          <div className="message-text message-removed">🚫 This message was removed</div>
+        ) : (
+          <div className="message-text">
+            {linkifyText(message.content)}
+            {message.edited && <span className="edited-tag"> (edited)</span>}
+          </div>
+        )}
 
-        {message.linkPreview && (
+        {!message.removed && message.linkPreview && (
           <div className="link-preview">
             <div className="link-preview-content">
               <a

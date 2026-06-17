@@ -11,6 +11,10 @@ export interface ScheduledMessage {
   id: string
   text: string
   sendAt: number // epoch ms
+  // 'message' (default) sends a normal chat at the time. 'reminder' instead
+  // raises an alert (nudge + chime + spoken) — to yourself or the other person.
+  kind?: 'message' | 'reminder'
+  target?: 'me' | 'peer'
 }
 
 const KEY = 'rlrchat-scheduled-messages'
@@ -39,11 +43,17 @@ export function saveScheduledMessages(list: ScheduledMessage[]): void {
   } catch (_) {}
 }
 
-export function newScheduledMessage(text: string, sendAt: number): ScheduledMessage {
+export function newScheduledMessage(
+  text: string,
+  sendAt: number,
+  opts?: { kind?: 'message' | 'reminder'; target?: 'me' | 'peer' }
+): ScheduledMessage {
   return {
     id: `sched-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     text,
-    sendAt
+    sendAt,
+    kind: opts?.kind ?? 'message',
+    target: opts?.target ?? 'peer'
   }
 }
 

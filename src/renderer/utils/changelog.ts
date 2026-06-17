@@ -14,6 +14,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '3.1.0',
+    items: [
+      '📸 Screenshot button — capture any window or your whole screen, crop it, and send it right into the chat',
+      '✏️ Edit or unsend your own message within a minute',
+      '⏰ Reminders — schedule an alert (chime + spoken) for yourself or the other person',
+      '👀 Smarter "Seen" — only marks seen when you\'re actually looking (focused, message on screen, recently active)',
+      '📥 Offline messages now survive a restart and still send when you reconnect'
+    ]
+  },
+  {
     version: '3.0.3',
     items: [
       '📞 Calling rings both of a person\'s computers — whoever answers first connects, the others stop ringing',

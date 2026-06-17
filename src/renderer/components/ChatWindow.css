@@ -1086,3 +1086,30 @@
   70%  { opacity: 1; }
   100% { opacity: 0; }
 }
+
+/* Reminder toggle inside the "Send later" scheduler */
+.scheduler-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.scheduler-reminder-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.scheduler-target-select {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 13px;
+}
+/* Editing banner reuses the reply-bar look with a distinct accent */
+.reply-bar.editing-bar {
+  border-left: 3px solid #f59e0b;
+}

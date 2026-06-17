@@ -1,0 +1,119 @@
+.screenshot-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.screenshot-panel {
+  width: 100%;
+  max-width: 560px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background: rgba(40, 30, 70, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.screenshot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+.screenshot-header h3 { margin: 0; font-size: 16px; }
+.screenshot-header .close-btn {
+  background: none; border: none; color: #fff; font-size: 22px; cursor: pointer; line-height: 1;
+}
+
+.screenshot-body { padding: 14px 16px; overflow-y: auto; }
+
+.screenshot-loading { padding: 30px; text-align: center; opacity: 0.8; }
+
+.screenshot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.screenshot-source {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  cursor: pointer;
+  color: #fff;
+  text-align: left;
+  transition: background 0.15s, transform 0.15s;
+}
+.screenshot-source:hover { background: rgba(255, 255, 255, 0.18); transform: translateY(-1px); }
+.screenshot-source:disabled { opacity: 0.6; cursor: default; }
+
+.screenshot-thumb-wrap {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.screenshot-thumb { width: 100%; height: 100%; object-fit: contain; }
+.screenshot-thumb.placeholder { background: rgba(255,255,255,0.05); }
+
+.screenshot-source-name { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.screenshot-source-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.screenshot-preview {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+  margin: 0 auto;
+}
+.screenshot-preview.cropping { cursor: crosshair; }
+.screenshot-preview-img {
+  max-width: 100%;
+  max-height: 60vh;
+  border-radius: 8px;
+  user-select: none;
+}
+.screenshot-crop-rect {
+  position: absolute;
+  border: 2px dashed #4ade80;
+  background: rgba(74, 222, 128, 0.18);
+  pointer-events: none;
+}
+
+.screenshot-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.ss-btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+}
+.ss-btn:hover { background: rgba(255, 255, 255, 0.22); }
+.ss-btn.active { background: rgba(74, 222, 128, 0.3); border-color: rgba(74, 222, 128, 0.6); }
+.ss-btn.ss-send { margin-left: auto; background: rgba(124, 58, 237, 0.55); border-color: rgba(167, 139, 250, 0.7); }
+.ss-btn.ss-send:hover { background: rgba(124, 58, 237, 0.75); }
+.ss-btn:disabled { opacity: 0.6; cursor: default; }

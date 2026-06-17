@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, dialog, shell, clipboard, app, safeStorage } from 'electron'
+import { ipcMain, BrowserWindow, dialog, shell, clipboard, app, safeStorage, desktopCapturer } from 'electron'
 import os from 'os'
 import path from 'path'
 import fs from 'fs'
@@ -526,6 +526,57 @@ export function setupIPCHandlers(window: BrowserWindow): void {
       return { success: true, dataUrl: `data:${mime};base64,${buf.toString('base64')}`, kind: audioMimes[ext] ? 'audio' : 'image' }
     } catch (err: any) {
       return { success: false, error: err?.message || 'Failed to read file' }
+    }
+  })
+
+  // Screenshot: list capturable screens + windows (with thumbnails) so the
+  // user can pick exactly what to send.
+  ipcMain.handle('screenshot:list-sources', async () => {
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen', 'window'],
+        thumbnailSize: { width: 320, height: 200 },
+        fetchWindowIcons: true
+      })
+      return sources.map((s) => ({
+        id: s.id,
+        name: s.name,
+        isScreen: s.id.startsWith('screen'),
+        thumb: s.thumbnail && !s.thumbnail.isEmpty() ? s.thumbnail.toDataURL() : '',
+        appIcon: s.appIcon && !s.appIcon.isEmpty() ? s.appIcon.toDataURL() : null
+      }))
+    } catch (_) {
+      return []
+    }
+  })
+
+  // Capture the chosen source at full resolution, returned as a PNG data URL.
+  ipcMain.handle('screenshot:capture', async (_event, sourceId: string) => {
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen', 'window'],
+        thumbnailSize: { width: 3840, height: 2160 } // capped to the source's real size
+      })
+      const src = sources.find((s) => s.id === sourceId)
+      if (!src || !src.thumbnail) return { success: false, error: 'Source not found' }
+      return { success: true, dataUrl: src.thumbnail.toDataURL() }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Capture failed' }
+    }
+  })
+
+  // Write an image data URL (screenshot, optionally cropped) to a temp file so
+  // it can be sent through the normal file-transfer path.
+  ipcMain.handle('file:save-temp-image', async (_event, dataUrl: string) => {
+    try {
+      const m = /^data:image\/(png|jpe?g);base64,(.+)$/.exec(dataUrl || '')
+      if (!m) return { success: false, error: 'Not a PNG/JPEG data URL' }
+      const ext = m[1] === 'png' ? 'png' : 'jpg'
+      const filePath = path.join(os.tmpdir(), `rlrchat-shot-${Date.now()}.${ext}`)
+      fs.writeFileSync(filePath, Buffer.from(m[2], 'base64'))
+      return { success: true, filePath }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to save image' }
     }
   })
 

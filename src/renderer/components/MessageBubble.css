@@ -473,3 +473,7 @@
   margin-top: 3px;
   text-align: right;
 }
+
+/* Edit / unsend */
+.edited-tag { font-size: 11px; opacity: 0.6; font-style: italic; }
+.message-removed { font-style: italic; opacity: 0.6; }

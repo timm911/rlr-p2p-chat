@@ -15,6 +15,7 @@ import { getVoiceCall, CallState, CallStateInfo } from '../services/voice-call'
 import { playSelectedNotification } from '../services/notification-sound'
 import { getSilenceTimeoutMs, getNoSpeechTimeoutMs } from '../utils/voice-timeouts'
 import EmojiPicker from './EmojiPicker'
+import ScreenshotPicker from './ScreenshotPicker'
 import {
   ScheduledMessage,
   loadScheduledMessages,
@@ -41,6 +42,8 @@ export interface Message {
   content: string
   timestamp: number
   deliveryStatus?: 'queued' | 'sending' | 'delivered' | 'seen'
+  edited?: boolean
+  removed?: boolean
   replyTo?: {
     id: string
     from: string
@@ -89,6 +92,8 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
   const [onlinePeers, setOnlinePeers] = useState<Set<string>>(new Set())
   const [isConnected, setIsConnected] = useState(true)
   const [replyTarget, setReplyTarget] = useState<{ id: string; from: string; snippet: string } | null>(null)
+  // When set, the input edits an existing sent message instead of sending new
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [isShaking, setIsShaking] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -105,12 +110,16 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
   const [showSettings, setShowSettings] = useState(false)
   // Full emoji picker: input mode (insert into textarea) + reaction mode (react to a message)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [showScreenshot, setShowScreenshot] = useState(false)
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null)
   // Scheduled messages ("Send later")
   const [showScheduler, setShowScheduler] = useState(false)
   const [showScheduledList, setShowScheduledList] = useState(false)
   const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>(() => loadScheduledMessages())
   const [customScheduleValue, setCustomScheduleValue] = useState('')
+  // "Send later" can instead be a reminder (alert) to me or the other person
+  const [scheduleAsReminder, setScheduleAsReminder] = useState(false)
+  const [reminderTarget, setReminderTarget] = useState<'me' | 'peer'>('peer')
   const [isListening, setIsListening] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [isDraggingInput, setIsDraggingInput] = useState(false)
@@ -162,6 +171,11 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
   // Read receipts: last received chat message id + the last id we sent a receipt for
   const lastReceivedChatIdRef = useRef<string | null>(null)
   const lastReceiptSentIdRef = useRef<string | null>(null)
+  // Real "Seen": only mark a message seen when the window is focused, the
+  // latest message is actually on screen (scrolled to the bottom), AND the user
+  // has interacted recently — not just "the window happened to be focused."
+  const lastActivityRef = useRef<number>(Date.now())
+  const atBottomRef = useRef<boolean>(true)
   // Nudge throttle + shake animation timer
   const lastNudgeSentRef = useRef<number>(0)
   const shakeTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -341,8 +355,28 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
       isProcessingScheduledRef.current = true
       try {
         for (const m of due) {
-          const ok = await sendChatMessageRef.current(m.text, { source: 'scheduled', bypassThrottle: true })
-          if (ok) {
+          let done = false
+          if (m.kind === 'reminder') {
+            if (m.target === 'peer') {
+              // Best-effort alert to the other person
+              await window.electronAPI.sendMessage({
+                type: 'reminder',
+                payload: { text: m.text, from: userIdentity },
+                timestamp: Date.now()
+              }).catch(() => {})
+              addSystemMessage(`⏰ Reminder sent: ${m.text}`)
+            } else {
+              // Remind myself: chime + shake + spoken, right here
+              addSystemMessage(`⏰ Reminder: ${m.text}`)
+              if (!getSoundService().isMuted()) soundService.play('nudge')
+              triggerShake()
+              void announceViaVoice(`Reminder. ${toSpokenText(m.text)}`, myStatusRef.current)
+            }
+            done = true
+          } else {
+            done = await sendChatMessageRef.current(m.text, { source: 'scheduled', bypassThrottle: true })
+          }
+          if (done) {
             const next = loadScheduledMessages().filter((x) => x.id !== m.id)
             saveScheduledMessages(next)
             setScheduledMessages(next)
@@ -429,12 +463,24 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
     const onFocus = () => {
       setUnreadCount(0)
       window.electronAPI.setBadgeCount(0).catch(() => {})
-      if (lastReceivedChatIdRef.current) {
-        sendReadReceipt(lastReceivedChatIdRef.current)
-      }
+      // Bringing the window to the front is a deliberate look → counts as activity
+      lastActivityRef.current = Date.now()
+      maybeMarkSeen()
     }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
+  }, [])
+
+  // Track real user activity for "Seen": any interaction refreshes the
+  // last-active time and re-checks whether the newest message is now seen.
+  useEffect(() => {
+    const onAct = () => {
+      lastActivityRef.current = Date.now()
+      maybeMarkSeen()
+    }
+    const events = ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart']
+    events.forEach((e) => window.addEventListener(e, onAct, { passive: true }))
+    return () => events.forEach((e) => window.removeEventListener(e, onAct))
   }, [])
 
   // Typing indicator: send typing when user types, clear after 2s idle
@@ -675,6 +721,8 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
           handleFileOfferReject()
         } else if (isListening) {
           cancelSpeech()
+        } else if (editingId) {
+          cancelEdit()
         } else if (replyTarget) {
           setReplyTargetBoth(null)
         }
@@ -683,7 +731,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [lightboxUrl, showScheduler, showScheduledList, showSettings, fileOfferDialog, isListening, replyTarget])
+  }, [lightboxUrl, showScheduler, showScheduledList, showSettings, fileOfferDialog, isListening, editingId, replyTarget])
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -699,15 +747,35 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
     }, 100)
   }, [messages])
 
-  // Load message history on mount
+  // Load message history on mount, then restore any persisted offline queue so
+  // messages composed while disconnected survive a restart and still send.
   useEffect(() => {
     let mounted = true
     window.electronAPI.historyLoad().then((loaded: any[]) => {
-      if (mounted && Array.isArray(loaded) && loaded.length > 0) {
-        // Queued-but-never-sent messages from a previous session would show a
-        // ⏳ forever (the in-memory queue is gone) — drop them on load
-        setMessages(loaded.filter((m: any) => m?.deliveryStatus !== 'queued'))
-      }
+      if (!mounted) return
+      // History save includes queued items; drop them here — the authoritative
+      // copy is the persisted queue restored just below (avoids duplicates).
+      const base = (Array.isArray(loaded) ? loaded : []).filter((m: any) => m?.deliveryStatus !== 'queued')
+
+      let queued: Message[] = []
+      try {
+        const raw = localStorage.getItem('rlrchat-pending-queue')
+        const arr = raw ? JSON.parse(raw) : []
+        if (Array.isArray(arr)) {
+          queued = arr
+            .filter((m: any) => m && m.id && m.type === 'chat')
+            .map((m: any) => ({ ...m, deliveryStatus: 'queued' as const }))
+        }
+      } catch (_) {}
+      pendingQueueRef.current = queued
+
+      const seen = new Set(base.map((m: any) => m.id))
+      const merged = [...base, ...queued.filter(m => !seen.has(m.id))]
+        .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+      if (merged.length > 0) setMessages(merged)
+
+      // Already connected at mount? Flush right away.
+      if (queued.length > 0 && isConnectedRef.current) void flushPendingQueue()
     })
     return () => { mounted = false }
   }, [])
@@ -782,9 +850,8 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
         // Read receipt: tell the peer we've actually seen it (window focused).
         // If unfocused now, the window 'focus' handler sends it later.
         lastReceivedChatIdRef.current = msg.payload.id
-        if (document.hasFocus()) {
-          sendReadReceipt(msg.payload.id)
-        }
+        // Only marks Seen if focused + at bottom + recently active
+        maybeMarkSeen()
         if (!document.hasFocus()) {
           setUnreadCount(prev => {
             const n = prev + 1
@@ -891,6 +958,23 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
       } else if (msg.type === 'history-response') {
         // The hub answered our history-sync request with everything we missed
         mergeHistory(msg.payload?.messages)
+      } else if (msg.type === 'edit') {
+        // Peer edited one of their messages — update it in place
+        setMessages(prev => prev.map(m =>
+          m.id === msg.payload?.id ? { ...m, content: String(msg.payload?.content ?? m.content), edited: true } : m
+        ))
+      } else if (msg.type === 'unsend') {
+        // Peer unsent one of their messages — show a tombstone
+        setMessages(prev => prev.map(m =>
+          m.id === msg.payload?.id ? { ...m, removed: true, content: '' } : m
+        ))
+      } else if (msg.type === 'reminder') {
+        // A scheduled reminder fired for us — alert prominently
+        const text = String(msg.payload?.text || '')
+        addSystemMessage(`⏰ Reminder: ${text}`)
+        if (!getSoundService().isMuted()) soundService.play('nudge')
+        triggerShake()
+        void announceViaVoice(`Reminder. ${toSpokenText(text)}`, myStatusRef.current)
       } else if (msg.type === 'file-offer') {
         soundService.play('file-transfer-started')
         window.electronAPI.notificationShowFileTransfer(peerName, msg.payload.fileName)
@@ -1136,8 +1220,21 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
     setMessages(prev => [...prev, msg])
   }
 
-  // Tell the peer a chat message has been seen (window focused). Deduped so
-  // focus events don't re-send a receipt for the same message.
+  // True "Seen": the window is focused, the newest received message is actually
+  // on screen (scrolled to bottom), and the user moved/typed in the last 60s.
+  // Without all three, it stays "Delivered ✓✓". Deduped by sendReadReceipt.
+  const SEEN_ACTIVE_MS = 60000
+  const maybeMarkSeen = () => {
+    const id = lastReceivedChatIdRef.current
+    if (!id) return
+    if (!document.hasFocus()) return
+    if (!atBottomRef.current) return
+    if (Date.now() - lastActivityRef.current > SEEN_ACTIVE_MS) return
+    sendReadReceipt(id)
+  }
+
+  // Tell the peer a chat message has been seen. Deduped so repeat triggers
+  // don't re-send a receipt for the same message.
   const sendReadReceipt = (messageId: string) => {
     if (lastReceiptSentIdRef.current === messageId) return
     lastReceiptSentIdRef.current = messageId
@@ -1158,6 +1255,13 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
       setIsShaking(false)
       shakeTimerRef.current = null
     }, 700)
+  }
+
+  // Persist the offline queue to disk so messages composed while disconnected
+  // survive a restart/reboot mid-disconnect (the queue used to be memory-only).
+  const PENDING_QUEUE_KEY = 'rlrchat-pending-queue'
+  const persistPendingQueue = () => {
+    try { localStorage.setItem(PENDING_QUEUE_KEY, JSON.stringify(pendingQueueRef.current)) } catch (_) {}
   }
 
   // Send every message queued while disconnected, oldest first. Stops (and
@@ -1184,6 +1288,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
         break
       }
       pendingQueueRef.current.shift()
+      persistPendingQueue()
       setMessages(prev => prev.map(x =>
         x.id === m.id ? { ...x, deliveryStatus: 'sending' as const } : x
       ))
@@ -1213,6 +1318,46 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
     inputRef.current?.focus()
   }
 
+  // Edit: load the message text into the input; the next send applies the edit
+  const handleStartEdit = (m: Message) => {
+    setEditingId(m.id)
+    setReplyTargetBoth(null)
+    setInputText(m.content)
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  const cancelEdit = () => {
+    setEditingId(null)
+    setInputText('')
+  }
+
+  const applyEdit = async () => {
+    const id = editingId
+    const text = inputText.trim()
+    if (!id) return
+    if (!text) { cancelEdit(); return }
+    setMessages(prev => prev.map(m => m.id === id ? { ...m, content: text, edited: true } : m))
+    setEditingId(null)
+    setInputText('')
+    setTimeout(() => inputRef.current?.focus(), 0)
+    await window.electronAPI.sendMessage({
+      type: 'edit',
+      payload: { id, content: text, from: userIdentity },
+      timestamp: Date.now()
+    }).catch(() => {})
+  }
+
+  // Unsend: remove your own recent message everywhere
+  const handleUnsend = async (id: string) => {
+    setMessages(prev => prev.map(m => m.id === id ? { ...m, removed: true, content: '' } : m))
+    if (editingId === id) cancelEdit()
+    await window.electronAPI.sendMessage({
+      type: 'unsend',
+      payload: { id, from: userIdentity },
+      timestamp: Date.now()
+    }).catch(() => {})
+  }
+
   // 👋 nudge: throttled to one every 3 seconds
   const handleNudgeClick = async () => {
     if (!isConnected) return
@@ -1232,6 +1377,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
   }
 
   const handleSendMessage = async () => {
+    if (editingId) { await applyEdit(); return }
     if (!inputText.trim()) return
     await sendChatMessage(inputText, { source: 'text' })
   }
@@ -1261,14 +1407,23 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
       addSystemMessage('Pick a time in the future to schedule the message.')
       return
     }
-    const entry = newScheduledMessage(text, sendAt)
+    const entry = newScheduledMessage(
+      text,
+      sendAt,
+      scheduleAsReminder ? { kind: 'reminder', target: reminderTarget } : undefined
+    )
     const next = [...loadScheduledMessages(), entry]
     saveScheduledMessages(next)
     setScheduledMessages(next)
     setInputText('')
     setShowScheduler(false)
     setCustomScheduleValue('')
-    addSystemMessage(`🕐 Message scheduled for ${formatSendAt(sendAt)}`)
+    if (scheduleAsReminder) {
+      const who = reminderTarget === 'me' ? 'you' : peerName
+      addSystemMessage(`⏰ Reminder set for ${who} at ${formatSendAt(sendAt)}`)
+    } else {
+      addSystemMessage(`🕐 Message scheduled for ${formatSendAt(sendAt)}`)
+    }
     setTimeout(() => inputRef.current?.focus(), 0)
   }
 
@@ -1438,6 +1593,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
       if (!isConnectedRef.current) {
         msg.deliveryStatus = 'queued'
         pendingQueueRef.current.push(msg)
+        persistPendingQueue()
         setMessages(prev => [...prev, msg])
         // Scheduled sends must not disturb what the user is doing right now
         // (open reply bar, half-typed input)
@@ -2323,6 +2479,14 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
         />
       )}
 
+      {/* Screenshot picker — capture a window/screen, optionally crop, then send */}
+      {showScreenshot && (
+        <ScreenshotPicker
+          onClose={() => setShowScreenshot(false)}
+          onSend={(filePath) => { void handleFileSend(filePath) }}
+        />
+      )}
+
       {/* Full emoji picker — insert into the message input */}
       {showEmojiPicker && (
         <EmojiPicker
@@ -2350,7 +2514,28 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
           onMouseDown={(e) => { if (e.target === e.currentTarget) setShowScheduler(false) }}
         >
           <div className="scheduler-panel" role="dialog" aria-label="Schedule message">
-            <div className="scheduler-title">🕐 Send later</div>
+            <div className="scheduler-title">{scheduleAsReminder ? '⏰ Reminder' : '🕐 Send later'}</div>
+            <div className="scheduler-mode">
+              <label className="scheduler-reminder-toggle">
+                <input
+                  type="checkbox"
+                  checked={scheduleAsReminder}
+                  onChange={(e) => setScheduleAsReminder(e.target.checked)}
+                />
+                Make this a reminder (alert with chime)
+              </label>
+              {scheduleAsReminder && (
+                <select
+                  className="scheduler-target-select"
+                  value={reminderTarget}
+                  onChange={(e) => setReminderTarget(e.target.value as 'me' | 'peer')}
+                  aria-label="Who to remind"
+                >
+                  <option value="peer">Remind {peerName}</option>
+                  <option value="me">Remind me</option>
+                </select>
+              )}
+            </div>
             {inputText.trim() ? (
               <div className="scheduler-snippet">
                 “{inputText.trim().length > 60 ? inputText.trim().slice(0, 60) + '…' : inputText.trim()}”
@@ -2487,6 +2672,8 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
           const el = e.currentTarget
           const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
           setShowJumpToBottom(!nearBottom)
+          atBottomRef.current = nearBottom
+          if (nearBottom) maybeMarkSeen() // scrolling the newest into view = seen
         }}
         role="log"
         aria-label="Chat messages"
@@ -2547,6 +2734,8 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
                 onReply={handleReply}
                 onOpenReactionPicker={(messageId) => setReactionPickerFor(messageId)}
                 onOpenImage={(url) => setLightboxUrl(url)}
+                onEdit={handleStartEdit}
+                onUnsend={handleUnsend}
                 showSeen={msg.id === lastSeenOwnId}
               />
             )
@@ -2633,6 +2822,23 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
             )}
           </div>
         )}
+        {editingId && (
+          <div className="reply-bar no-drag editing-bar">
+            <div className="reply-bar-text">
+              <span className="reply-bar-label">✏️ Editing message</span>
+              <span className="reply-bar-snippet">Press Enter to save · Esc to cancel</span>
+            </div>
+            <button
+              type="button"
+              className="reply-bar-cancel"
+              onClick={cancelEdit}
+              aria-label="Cancel edit"
+              title="Cancel edit"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         {replyTarget && (
           <div className="reply-bar no-drag">
             <div className="reply-bar-text">
@@ -2701,6 +2907,15 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
               aria-label="Attach file"
             >
               📎
+            </button>
+            <button
+              className="tool-btn"
+              title="Screenshot a window or screen"
+              onClick={() => setShowScreenshot(true)}
+              disabled={!isConnected}
+              aria-label="Take and send a screenshot"
+            >
+              📸
             </button>
             <button
               className={`tool-btn ${isListening ? 'recording' : ''}`}
