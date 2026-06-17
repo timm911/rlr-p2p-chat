@@ -16,6 +16,8 @@ import { playSelectedNotification } from '../services/notification-sound'
 import { getSilenceTimeoutMs, getNoSpeechTimeoutMs } from '../utils/voice-timeouts'
 import EmojiPicker from './EmojiPicker'
 import ScreenshotPicker from './ScreenshotPicker'
+import ScreenShareViewer from './ScreenShareViewer'
+import { getScreenShare } from '../services/screen-share'
 import {
   ScheduledMessage,
   loadScheduledMessages,
@@ -111,6 +113,10 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
   // Full emoji picker: input mode (insert into textarea) + reaction mode (react to a message)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [showScreenshot, setShowScreenshot] = useState(false)
+  // Live screen sharing
+  const [shareSourcePicker, setShareSourcePicker] = useState(false)
+  const [isSharingScreen, setIsSharingScreen] = useState(false)
+  const [viewingShareFrom, setViewingShareFrom] = useState<string | null>(null)
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null)
   // Scheduled messages ("Send later")
   const [showScheduler, setShowScheduler] = useState(false)
@@ -341,6 +347,21 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
   useEffect(() => {
     sendChatMessageRef.current = sendChatMessage
   })
+
+  // Screen share: tell the service who we are, and open/close the viewer when a
+  // remote share starts/stops.
+  useEffect(() => {
+    const ss = getScreenShare()
+    ss.setIdentity(userIdentity)
+    const off = ss.onViewerEvent((ev) => {
+      if (ev.type === 'start') setViewingShareFrom(ev.from || peerName)
+      else setViewingShareFrom(null)
+    })
+    return () => {
+      off()
+      if (ss.isSharing()) ss.stopShare()
+    }
+  }, [userIdentity, peerName])
 
   // Scheduled messages ("Send later"): localStorage is the source of truth so
   // they survive restarts. Every ~15s (plus shortly after launch, to catch
@@ -1032,6 +1053,12 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
         getVoiceCall().handlePeerEnd()
       } else if (msg.type === 'call-audio') {
         getVoiceCall().ingestAudio(msg.payload?.data)
+      } else if (msg.type === 'screen-share-start') {
+        getScreenShare().handleRemoteStart(msg.payload?.from, msg.payload?.mimeType)
+      } else if (msg.type === 'screen-frame') {
+        getScreenShare().handleRemoteFrame(msg.payload?.data)
+      } else if (msg.type === 'screen-share-stop') {
+        getScreenShare().handleRemoteStop(msg.payload?.from)
       }
     }
 
@@ -2286,6 +2313,22 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
     getVoiceCall().start()
   }
 
+  const startScreenShare = async (sourceId: string) => {
+    try {
+      await getScreenShare().startShare(sourceId)
+      setIsSharingScreen(true)
+      addSystemMessage('🖥️ You started sharing your screen')
+    } catch (e) {
+      addSystemMessage('Could not start screen share: ' + (e as Error).message)
+    }
+  }
+
+  const stopScreenShare = () => {
+    getScreenShare().stopShare()
+    setIsSharingScreen(false)
+    addSystemMessage('🖥️ You stopped sharing your screen')
+  }
+
   const toggleCallMicMute = () => {
     const next = !isCallMicMuted
     getVoiceCall().setMicMuted(next)
@@ -2384,6 +2427,16 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
             aria-label="Start voice call"
           >
             📞
+          </button>
+
+          <button
+            className={`icon-btn ${isSharingScreen ? 'active' : ''}`}
+            onClick={() => (isSharingScreen ? stopScreenShare() : setShareSourcePicker(true))}
+            disabled={!isConnected}
+            title={isSharingScreen ? 'Stop sharing your screen' : 'Share your screen'}
+            aria-label="Share screen"
+          >
+            🖥️
           </button>
 
           <button
@@ -2490,7 +2543,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
       {/* Full emoji picker — insert into the message input */}
       {showEmojiPicker && (
         <EmojiPicker
-          onPick={insertEmoji}
+          onPick={(emoji) => { insertEmoji(emoji); setShowEmojiPicker(false) }}
           onClose={() => setShowEmojiPicker(false)}
         />
       )}
@@ -2579,6 +2632,35 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Screen-share source picker */}
+      {shareSourcePicker && (
+        <ScreenshotPicker
+          pickOnly
+          title="Pick a screen or window to share"
+          onPick={(id) => { void startScreenShare(id) }}
+          onClose={() => setShareSourcePicker(false)}
+        />
+      )}
+
+      {/* Live screen-share viewer (someone is sharing to us) */}
+      {viewingShareFrom && (
+        <ScreenShareViewer
+          sharerName={viewingShareFrom}
+          onClose={() => { getScreenShare().handleRemoteStop(); setViewingShareFrom(null) }}
+        />
+      )}
+
+      {/* You are sharing your screen */}
+      {isSharingScreen && (
+        <div className="call-bar in-call" role="status" aria-live="polite">
+          <span className="call-live-dot" aria-hidden="true" />
+          You're sharing your screen
+          <button className="call-btn call-hangup-btn" onClick={stopScreenShare} aria-label="Stop sharing screen">
+            Stop sharing
+          </button>
         </div>
       )}
 

@@ -12,12 +12,17 @@ interface Source {
 interface Props {
   onClose: () => void
   /** Called with a temp file path of the (optionally cropped) screenshot to send */
-  onSend: (filePath: string) => void
+  onSend?: (filePath: string) => void
+  /** Pick-only mode: clicking a source returns its id instead of capturing
+   *  (used to choose what to live-share). */
+  pickOnly?: boolean
+  onPick?: (sourceId: string, name: string) => void
+  title?: string
 }
 
 type Rect = { x: number; y: number; w: number; h: number }
 
-function ScreenshotPicker({ onClose, onSend }: Props) {
+function ScreenshotPicker({ onClose, onSend, pickOnly, onPick, title }: Props) {
   const [sources, setSources] = useState<Source[]>([])
   const [loading, setLoading] = useState(true)
   const [captured, setCaptured] = useState<string | null>(null) // full-res data URL
@@ -45,7 +50,13 @@ function ScreenshotPicker({ onClose, onSend }: Props) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const pick = async (id: string) => {
+  const pick = async (id: string, name: string) => {
+    // Pick-only mode (choosing what to live-share): return the id, don't capture
+    if (pickOnly) {
+      onPick?.(id, name)
+      onClose()
+      return
+    }
     setBusy(true)
     const r = await window.electronAPI.screenshotCapture(id)
     setBusy(false)
@@ -105,7 +116,7 @@ function ScreenshotPicker({ onClose, onSend }: Props) {
     const saved = await window.electronAPI.saveTempImage(dataUrl)
     setBusy(false)
     if (saved.success && saved.filePath) {
-      onSend(saved.filePath)
+      onSend?.(saved.filePath)
       onClose()
     }
   }
@@ -114,7 +125,7 @@ function ScreenshotPicker({ onClose, onSend }: Props) {
     <div className="screenshot-backdrop no-drag" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="screenshot-panel" role="dialog" aria-label="Take a screenshot">
         <div className="screenshot-header">
-          <h3>{captured ? 'Preview & send' : 'Pick a window or screen'}</h3>
+          <h3>{captured ? 'Preview & send' : (title || 'Pick a window or screen')}</h3>
           <button className="close-btn" onClick={onClose} aria-label="Close">×</button>
         </div>
 
@@ -127,7 +138,7 @@ function ScreenshotPicker({ onClose, onSend }: Props) {
             ) : (
               <div className="screenshot-grid">
                 {sources.map((s) => (
-                  <button key={s.id} className="screenshot-source" onClick={() => pick(s.id)} disabled={busy} title={s.name}>
+                  <button key={s.id} className="screenshot-source" onClick={() => pick(s.id, s.name)} disabled={busy} title={s.name}>
                     <div className="screenshot-thumb-wrap">
                       {s.thumb ? <img src={s.thumb} alt={s.name} className="screenshot-thumb" /> : <div className="screenshot-thumb placeholder" />}
                     </div>

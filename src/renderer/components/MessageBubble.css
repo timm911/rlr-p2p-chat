@@ -97,26 +97,29 @@
     inset 0 -10px 18px -8px rgba(0, 0, 0, 0.30);
 }
 
+/* Your own (sent) bubbles: same glassy, inflated 3D treatment as received, but
+   purple-tinted with white text so they stay distinct and readable over the
+   moving background. */
 .message-wrapper.sent .message-bubble {
-  background: linear-gradient(165deg, rgba(255, 255, 255, 1) 0%, rgba(243, 240, 255, 0.98) 50%, rgba(233, 228, 254, 0.95) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.8);
-  color: #5b21b6;
+  background: linear-gradient(165deg, rgba(196, 181, 253, 0.34) 0%, rgba(139, 92, 246, 0.28) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  color: #fff;
   border-bottom-right-radius: 8px;
   box-shadow:
-    0 18px 34px -10px rgba(76, 29, 149, 0.42),
-    0 8px 14px -6px rgba(76, 29, 149, 0.24),
-    0 1px 1px rgba(0, 0, 0, 0.1),
-    inset 0 3px 2px rgba(255, 255, 255, 1),
-    inset 0 -10px 18px -9px rgba(91, 33, 182, 0.35),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+    0 18px 34px -10px rgba(0, 0, 0, 0.40),
+    0 8px 14px -6px rgba(0, 0, 0, 0.28),
+    0 1px 1px rgba(0, 0, 0, 0.15),
+    inset 0 3px 2px rgba(255, 255, 255, 0.6),
+    inset 0 -10px 18px -8px rgba(0, 0, 0, 0.30),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.10);
 }
 
 .message-wrapper.sent .message-bubble:hover {
   box-shadow:
-    0 26px 44px -12px rgba(76, 29, 149, 0.48),
-    0 10px 18px -7px rgba(76, 29, 149, 0.26),
-    inset 0 3px 2px rgba(255, 255, 255, 1),
-    inset 0 -10px 18px -9px rgba(91, 33, 182, 0.35);
+    0 26px 44px -12px rgba(0, 0, 0, 0.46),
+    0 10px 18px -7px rgba(0, 0, 0, 0.3),
+    inset 0 3px 2px rgba(255, 255, 255, 0.65),
+    inset 0 -10px 18px -8px rgba(0, 0, 0, 0.30);
 }
 
 .message-text {
@@ -143,7 +146,8 @@
 }
 
 .message-wrapper.sent .message-text .inline-link {
-  color: #6d28d9;
+  color: #fff;
+  font-weight: 500;
 }
 
 .message-wrapper.received .message-text .inline-link {

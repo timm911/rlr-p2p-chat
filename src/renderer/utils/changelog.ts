@@ -14,6 +14,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '3.2.0',
+    items: [
+      '🖥️ Live screen sharing — share a window or your whole screen in real time (button in the header)',
+      '😀 React with emojis on photos & files, not just text messages',
+      '✨ Your own message bubbles are now glassy & 3D to match the ones you receive',
+      '🙂 The emoji picker closes after you pick one'
+    ]
+  },
+  {
     version: '3.1.0',
     items: [
       '📸 Screenshot button — capture any window or your whole screen, crop it, and send it right into the chat',

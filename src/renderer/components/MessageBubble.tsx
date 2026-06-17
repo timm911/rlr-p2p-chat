@@ -133,6 +133,28 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onRepl
         >
           {showReactionPicker && (
             <div className="reaction-picker" role="toolbar" aria-label="Message actions">
+              {REACTION_EMOJIS.map(emoji => (
+                <button
+                  key={emoji}
+                  className="emoji-btn"
+                  onClick={() => onAddReaction(message.id, emoji)}
+                  aria-label={`React with ${emoji}`}
+                  type="button"
+                >
+                  {emoji}
+                </button>
+              ))}
+              {onOpenReactionPicker && (
+                <button
+                  className="emoji-btn more-reactions-btn"
+                  onClick={() => onOpenReactionPicker(message.id)}
+                  aria-label="More reactions"
+                  title="React with any emoji"
+                  type="button"
+                >
+                  ➕
+                </button>
+              )}
               <button
                 className="emoji-btn reply-btn"
                 onClick={() => onReply(message)}
@@ -236,6 +258,23 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onRepl
               </div>
             )}
           </div>
+
+          {message.reactions && Object.keys(message.reactions).length > 0 && (
+            <div className="reactions">
+              {Object.entries(message.reactions).map(([emoji, count]) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  className="reaction-badge reaction-badge-btn"
+                  onClick={() => onRemoveReaction(message.id, emoji)}
+                  title="Click to remove this reaction"
+                  aria-label={`Remove ${emoji} reaction`}
+                >
+                  {emoji} <span className="reaction-count">{count}</span>
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="message-time">
             {formatTime(message.timestamp)} • {message.from}
