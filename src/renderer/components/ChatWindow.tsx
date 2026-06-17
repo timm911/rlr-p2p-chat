@@ -8,7 +8,7 @@ import { isEchoOfRecentTTS, recordSpokenText } from '../utils/echo-guard'
 import { toSpokenText } from '../utils/linkify'
 import { resolveInitialVoice, getSavedVoice, setSavedVoice } from '../utils/tts-prefs'
 import { dayLabel, isNewDay } from '../utils/date-format'
-import { compareVersions } from '../utils/changelog'
+import { compareVersions, CHANGELOG } from '../utils/changelog'
 import { getAutoAwayEnabled, getAutoAwayMinutes } from '../utils/auto-away'
 import { getAutoTrimEnabled, trimOldMessages } from '../utils/auto-trim'
 import { getVoiceRecorder } from '../services/voice-recorder'
@@ -828,6 +828,26 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
     const startup = setTimeout(run, 4000)
     const timer = setInterval(run, 60 * 60 * 1000)
     return () => { clearTimeout(startup); clearInterval(timer) }
+  }, [])
+
+  // Auto-post "what's new" once after updating to a new version (delayed so it
+  // lands after history has loaded). Stored per device.
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      try {
+        const v = await window.electronAPI.updateGetVersion()
+        if (!v) return
+        let lastSeen = ''
+        try { lastSeen = localStorage.getItem('rlrchat-last-seen-version') || '' } catch (_) {}
+        if (lastSeen === v) return
+        const entry = CHANGELOG.find((e) => e.version === v)
+        if (entry && (!lastSeen || compareVersions(v, lastSeen) > 0)) {
+          addSystemMessage(`📋 Updated to v${v} — what's new:\n` + entry.items.map((i) => `• ${i}`).join('\n'))
+        }
+        try { localStorage.setItem('rlrchat-last-seen-version', v) } catch (_) {}
+      } catch (_) {}
+    }, 2500)
+    return () => clearTimeout(t)
   }, [])
 
   // "Post to chat" from the Release Notes viewer drops the notes in as a local
@@ -3015,57 +3035,63 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
               onClick={() => setShowEmojiPicker(true)}
               aria-label="Insert emoji"
             >
-              😊
+              <span className="tool-ico">😊</span>
+              <span className="tool-label">Emoji</span>
             </button>
             <button
               className="tool-btn"
-              title="Send later (schedule this message)"
+              title="Send later / set a reminder"
               onClick={() => setShowScheduler(true)}
-              aria-label="Schedule message"
+              aria-label="Schedule message or reminder"
             >
-              🕐
+              <span className="tool-ico">🕐</span>
+              <span className="tool-label">Later</span>
             </button>
             <button
               className="tool-btn"
-              title="Attach file"
+              title="Attach a file"
               onClick={handleFileSelect}
               disabled={!isConnected}
               aria-label="Attach file"
             >
-              📎
+              <span className="tool-ico">📎</span>
+              <span className="tool-label">File</span>
             </button>
             <button
               className="tool-btn"
-              title="Screenshot a window or screen"
+              title="Screenshot a window or screen and send it"
               onClick={() => setShowScreenshot(true)}
               disabled={!isConnected}
               aria-label="Take and send a screenshot"
             >
-              📸
+              <span className="tool-ico">📸</span>
+              <span className="tool-label">Screen</span>
             </button>
             <button
               className={`tool-btn ${isListening ? 'recording' : ''}`}
               title={
                 isListening
-                  ? 'Stop listening'
+                  ? 'Stop talking (dictation)'
                   : isTTSSpeaking
-                    ? 'TTS is reading. Click to interrupt and speak.'
-                    : 'Click to start voice input'
+                    ? 'Reading aloud. Click to interrupt and talk.'
+                    : 'Talk to type — speak and it becomes text'
               }
               onClick={handleMicClick}
               disabled={!isConnected}
-              aria-label={isListening ? "Stop listening" : "Start voice input"}
+              aria-label={isListening ? 'Stop dictation' : 'Talk to type (dictation)'}
             >
-              🎤
+              <span className="tool-ico">🎤</span>
+              <span className="tool-label">Talk</span>
             </button>
             <button
               className="tool-btn"
-              title={callState === 'idle' ? 'Record a voice message' : 'Unavailable during a call'}
+              title={callState === 'idle' ? 'Record and send a voice message' : 'Unavailable during a call'}
               onClick={startVoiceMessage}
               disabled={!isConnected || callState !== 'idle'}
               aria-label="Record a voice message"
             >
-              🎙️
+              <span className="tool-ico">🎙️</span>
+              <span className="tool-label">Voice</span>
             </button>
             <button
               className="tool-btn send-btn"
@@ -3074,7 +3100,8 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
               disabled={!inputText.trim() || isSending}
               aria-label="Send message"
             >
-              ➤
+              <span className="tool-ico">➤</span>
+              <span className="tool-label">Send</span>
             </button>
           </div>
         </div>

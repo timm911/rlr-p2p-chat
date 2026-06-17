@@ -14,6 +14,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '3.3.0',
+    items: [
+      '🔣 Bundled an emoji font so ALL emojis & icons show on every computer (fixes blank squares on older Windows — picker, reactions, edit/delete icons)',
+      '🏷️ Buttons by the text box now have labels (Emoji, Later, File, Screen, Talk, Voice, Send) so you don\'t have to guess',
+      '📋 "What\'s new" now posts itself into the chat automatically after an update'
+    ]
+  },
+  {
     version: '3.2.3',
     items: [
       '🎨 Clearer per-person bubble colors — RLRJupiter (blue), Ramjet (amber), Ripster (pink); your own messages use your color so sender vs receiver never match',

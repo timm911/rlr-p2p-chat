@@ -1,3 +1,12 @@
+/* Bundled color-emoji font so every emoji and emoji-based UI icon renders the
+   same on every machine — older Windows (RLRJupiter/Ramjet) is missing many
+   glyphs in its system emoji font, which showed up as blank squares. */
+@font-face {
+  font-family: 'Noto Color Emoji';
+  src: url('../assets/NotoColorEmoji.ttf') format('truetype');
+  font-display: swap;
+}
+
 :root {
   --accent: #8b5cf6;
   /* Foreground "ink" — overridden per background by background.ts so text
@@ -22,13 +31,19 @@ html {
 }
 
 body {
-  font-family: 'Segoe UI', 'SF Pro Display', system-ui, sans-serif;
+  font-family: 'Segoe UI', 'SF Pro Display', system-ui, sans-serif, 'Noto Color Emoji';
   background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 35%, #a855f7 60%, #ec4899 100%);
   background-size: 400% 400%;
   animation: gradientShift 18s ease infinite;
   height: 100vh;
   overflow: hidden;
   position: relative;
+}
+
+/* Form controls don't inherit font-family by default — make sure every button
+   and input can fall back to the bundled emoji font so icon glyphs render. */
+button, input, textarea, select {
+  font-family: 'Segoe UI', 'SF Pro Display', system-ui, sans-serif, 'Noto Color Emoji';
 }
 
 body.theme-light {

@@ -331,9 +331,9 @@
 
 .input-tools {
   display: flex;
-  /* Tighter gap — six tools (😊 🕐 📎 🎤 🎙️ ➤) must fit in the 390px window */
-  gap: 6px;
-  align-items: center;
+  /* Tight gap so 7 labeled tools fit in the 390px window */
+  gap: 3px;
+  align-items: flex-end;
 }
 
 .tool-btn {
@@ -341,14 +341,34 @@
   border: none;
   color: var(--ink-soft, rgba(255,255,255,0.8));
   cursor: pointer;
-  font-size: 20px;
   transition: all 0.3s;
-  padding: 0;
+  padding: 2px 1px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  line-height: 1;
+}
+
+.tool-ico {
+  font-size: 19px;
+  line-height: 1;
+}
+
+.tool-label {
+  font-size: 8.5px;
+  opacity: 0.85;
+  letter-spacing: 0.2px;
 }
 
 .tool-btn:hover {
   color: var(--ink, #fff);
-  transform: scale(1.15);
+  transform: translateY(-2px);
+}
+
+.tool-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .tool-btn.recording {
