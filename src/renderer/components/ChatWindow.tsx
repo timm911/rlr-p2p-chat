@@ -889,7 +889,9 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
           linkPreview: msg.payload.linkPreview,
           replyTo: msg.payload.replyTo
         }
-        setMessages(prev => [...prev, chatMsg])
+        // Guard against duplicates: the same message can arrive more than once
+        // (a reconnect re-flushing the offline queue, relay timing, etc.).
+        setMessages(prev => prev.some(m => m.id === chatMsg.id) ? prev : [...prev, chatMsg])
         window.electronAPI.sendMessage({
           type: 'chat-ack',
           payload: { messageId: msg.payload.id },
@@ -1616,7 +1618,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
     setIsSending(true)
 
     try {
-      const messageId = Date.now().toString()
+      const messageId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
       const hasLink = /https?:\/\/[^\s]+/i.test(text)
       const msg: Message = {
         id: messageId,
@@ -1652,7 +1654,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
         msg.deliveryStatus = 'queued'
         pendingQueueRef.current.push(msg)
         persistPendingQueue()
-        setMessages(prev => [...prev, msg])
+        setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg])
         // Scheduled sends must not disturb what the user is doing right now
         // (open reply bar, half-typed input)
         if (options.source !== 'scheduled') {
@@ -1685,7 +1687,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
         throw new Error('Message could not be sent because the connection is not ready.')
       }
 
-      setMessages(prev => [...prev, msg])
+      setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg])
 
       // Scheduled sends must not disturb what the user is doing right now
       // (open reply bar, half-typed input, focus)

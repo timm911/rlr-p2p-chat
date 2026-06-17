@@ -14,6 +14,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '3.2.2',
+    items: [
+      '✏️ Edit & unsend now work anytime on your own messages (removed the 1-minute limit)',
+      '🐞 Fixed messages sometimes showing up twice (duplicates)'
+    ]
+  },
+  {
     version: '3.2.1',
     items: [
       '🧹 "Clear history" now clears everything and stays cleared (won\'t re-sync old messages back)',

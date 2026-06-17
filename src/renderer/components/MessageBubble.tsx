@@ -31,9 +31,6 @@ interface Props {
   showSeen?: boolean
 }
 
-// You can edit/unsend your own chat message for a short window after sending.
-const EDIT_WINDOW_MS = 60000
-
 // Per-sender tint class so it's easy to tell who sent what in the group chat
 // (RLRJupiter vs Ramjet vs Ripster). Used on received bubbles.
 function senderClass(from: string): string {
@@ -46,8 +43,8 @@ function senderClass(from: string): string {
 const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '🔥']
 
 function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onReply, onOpenReactionPicker, onOpenImage, onEdit, onUnsend, showSeen }: Props) {
-  const canEditUnsend = isOwn && message.type === 'chat' && !message.removed &&
-    (Date.now() - message.timestamp < EDIT_WINDOW_MS)
+  // Your own text messages can always be edited or unsent (no time limit)
+  const canEditUnsend = isOwn && message.type === 'chat' && !message.removed
   const [showReactionPicker, setShowReactionPicker] = useState(false)
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null)
   const [audioDataUrl, setAudioDataUrl] = useState<string | null>(null)
@@ -329,7 +326,7 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onRepl
                 className="emoji-btn edit-btn"
                 onClick={() => onEdit(message)}
                 aria-label="Edit this message"
-                title="Edit (within 1 min)"
+                title="Edit"
                 type="button"
               >
                 ✏️
@@ -340,7 +337,7 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onRepl
                 className="emoji-btn unsend-btn"
                 onClick={() => onUnsend(message.id)}
                 aria-label="Unsend this message"
-                title="Unsend (within 1 min)"
+                title="Unsend (delete for everyone)"
                 type="button"
               >
                 🗑️
