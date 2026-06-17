@@ -14,6 +14,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '3.2.1',
+    items: [
+      '🧹 "Clear history" now clears everything and stays cleared (won\'t re-sync old messages back)',
+      '⏳ New setting: auto-trim messages older than 3 months'
+    ]
+  },
+  {
     version: '3.2.0',
     items: [
       '🖥️ Live screen sharing — share a window or your whole screen in real time (button in the header)',

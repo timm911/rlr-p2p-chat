@@ -10,6 +10,7 @@ import { resolveInitialVoice, getSavedVoice, setSavedVoice } from '../utils/tts-
 import { dayLabel, isNewDay } from '../utils/date-format'
 import { compareVersions } from '../utils/changelog'
 import { getAutoAwayEnabled, getAutoAwayMinutes } from '../utils/auto-away'
+import { getAutoTrimEnabled, trimOldMessages } from '../utils/auto-trim'
 import { getVoiceRecorder } from '../services/voice-recorder'
 import { getVoiceCall, CallState, CallStateInfo } from '../services/voice-call'
 import { playSelectedNotification } from '../services/notification-sound'
@@ -814,6 +815,21 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
     messagesRef.current = messages
   }, [messages])
 
+  // Auto-trim: if enabled, drop messages older than ~3 months (on launch and
+  // hourly). The debounced history save then persists the trimmed list.
+  useEffect(() => {
+    const run = () => {
+      if (!getAutoTrimEnabled()) return
+      setMessages(prev => {
+        const trimmed = trimOldMessages(prev)
+        return trimmed.length === prev.length ? prev : trimmed
+      })
+    }
+    const startup = setTimeout(run, 4000)
+    const timer = setInterval(run, 60 * 60 * 1000)
+    return () => { clearTimeout(startup); clearInterval(timer) }
+  }, [])
+
   // Merge a batch of history messages (from the hub's history-sync reply) into
   // state, de-duped by id. Used so a machine that was asleep/off catches up on
   // everything it missed when it reconnects.
@@ -837,7 +853,18 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
     let mounted = true
 
     const offHistoryCleared = window.electronAPI.onHistoryCleared(() => {
-      if (mounted) setMessages([])
+      if (!mounted) return
+      // Clear EVERYTHING locally: on-screen messages, the persisted offline
+      // queue, and the seen/receipt bookkeeping…
+      setMessages([])
+      pendingQueueRef.current = []
+      try { localStorage.removeItem('rlrchat-pending-queue') } catch (_) {}
+      lastReceivedChatIdRef.current = null
+      lastReceiptSentIdRef.current = null
+      // …and set a "cleared" watermark so history-sync won't re-pull anything
+      // from before the clear when we reconnect (otherwise clear wouldn't stick
+      // for a connector). New messages after this moment still sync normally.
+      try { localStorage.setItem('rlrchat-history-cleared-at', String(Date.now())) } catch (_) {}
     })
 
     // Create handlers that won't change on re-render
@@ -1097,9 +1124,13 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
           for (const m of messagesRef.current) {
             if ((m.type === 'chat' || m.type === 'file') && (m.timestamp || 0) > newest) newest = m.timestamp
           }
+          // Never pull anything from before a manual "Clear history" — otherwise
+          // reconnecting would re-download everything we just cleared.
+          let clearedAt = 0
+          try { clearedAt = Number(localStorage.getItem('rlrchat-history-cleared-at') || 0) } catch (_) {}
           void window.electronAPI.sendMessage({
             type: 'history-request',
-            payload: { since: newest },
+            payload: { since: Math.max(newest, clearedAt) },
             timestamp: Date.now()
           })
         }

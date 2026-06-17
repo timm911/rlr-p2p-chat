@@ -9,6 +9,7 @@ import { getBackground, setBackground, BACKGROUND_OPTIONS, getInkPreference, set
 import { setSavedVoice } from '../utils/tts-prefs'
 import { getTextScale, setTextScale, MIN_SCALE, MAX_SCALE } from '../utils/text-size'
 import { getAutoAwayEnabled, setAutoAwayEnabled, getAutoAwayMinutes, setAutoAwayMinutes } from '../utils/auto-away'
+import { getAutoTrimEnabled, setAutoTrimEnabled } from '../utils/auto-trim'
 import { SOUND_OPTIONS, getSelectedSound, setSelectedSound, previewSound, preloadSelected, listCustomSounds, addCustomSound, removeCustomSound, CustomSound } from '../services/notification-sound'
 import { getAutoReconnect, setAutoReconnect } from '../utils/connection-settings'
 import { getSpeechEngineSetting, setSpeechEngineSetting, SpeechEngineKind } from '../services/speech-engine'
@@ -55,6 +56,7 @@ function SettingsMenu({ onClose, onReconnect, onLogoff }: Props) {
   const [checking, setChecking] = useState(false)
   const [autoAway, setAutoAwayState] = useState(getAutoAwayEnabled)
   const [autoAwayMin, setAutoAwayMinState] = useState(getAutoAwayMinutes)
+  const [autoTrim, setAutoTrimState] = useState(getAutoTrimEnabled)
   const [showNotifSound, setShowNotifSound] = useState(false)
   const [notifSound, setNotifSound] = useState(getSelectedSound)
   // Saved custom sound files (the legacy single custom is migrated into the
@@ -1007,6 +1009,27 @@ function SettingsMenu({ onClose, onReconnect, onLogoff }: Props) {
             >
               Clear history
             </button>
+          </div>
+
+          <div className="setting-item">
+            <span className="setting-icon" aria-hidden="true">🧹</span>
+            <span>Auto-trim old messages</span>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={autoTrim}
+                onChange={(e) => {
+                  const v = e.target.checked
+                  setAutoTrimState(v)
+                  setAutoTrimEnabled(v)
+                }}
+                aria-label="Auto-trim messages older than 3 months"
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+          <div className="tts-info" style={{ paddingLeft: 44, paddingTop: 0, marginTop: -4 }}>
+            When on, messages older than 3 months are removed automatically (this device).
           </div>
 
           <div className="setting-divider" />
