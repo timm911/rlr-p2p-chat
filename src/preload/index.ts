@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   maximizeWindow: () => ipcRenderer.send('window:maximize'),
   closeWindow: () => ipcRenderer.send('window:close'),
   openExternal: (url: string) => ipcRenderer.invoke('window:open-external', url),
+  getOpenAtLogin: () => ipcRenderer.invoke('app:get-open-at-login'),
+  setOpenAtLogin: (enabled: boolean) => ipcRenderer.invoke('app:set-open-at-login', enabled),
 
   // Auto-update status
   onUpdateStatus: (callback: (s: { status: string; info?: any }) => void) => {
@@ -205,6 +207,8 @@ export interface ElectronAPI {
   maximizeWindow: () => void
   closeWindow: () => void
   openExternal: (url: string) => Promise<void>
+  getOpenAtLogin: () => Promise<boolean>
+  setOpenAtLogin: (enabled: boolean) => Promise<boolean>
   onUpdateStatus: (callback: (s: { status: string; info?: any }) => void) => () => void
   updateCheck: () => Promise<{ ok: boolean; version?: string; reason?: string }>
   updateGetVersion: () => Promise<string>

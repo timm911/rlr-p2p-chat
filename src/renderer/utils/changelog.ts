@@ -14,6 +14,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '3.4.0',
+    items: [
+      '🚀 New setting: "Start with Windows" — the app can launch automatically when you sign in (Settings, under Auto-reconnect)',
+      '🔗 "View on GitHub" link added to the bottom of the Release Notes'
+    ]
+  },
+  {
     version: '3.3.0',
     items: [
       '🔣 Bundled an emoji font so ALL emojis & icons show on every computer (fixes blank squares on older Windows — picker, reactions, edit/delete icons)',

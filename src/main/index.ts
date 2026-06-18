@@ -205,6 +205,17 @@ ipcMain.handle('window:open-external', async (_event, url: string) => {
   await shell.openExternal(url)
 })
 
+// Start-with-Windows (login item). Registers the app to launch at user logon.
+// '--hidden' lets us optionally start minimized in the future; harmless if unused.
+ipcMain.handle('app:get-open-at-login', () => {
+  return app.getLoginItemSettings().openAtLogin
+})
+
+ipcMain.handle('app:set-open-at-login', (_event, enabled: boolean) => {
+  app.setLoginItemSettings({ openAtLogin: !!enabled })
+  return app.getLoginItemSettings().openAtLogin
+})
+
 app.whenReady().then(() => {
   app.setAppUserModelId('com.rlr.p2pchat')
 

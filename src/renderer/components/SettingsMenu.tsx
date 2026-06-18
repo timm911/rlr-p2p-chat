@@ -117,6 +117,7 @@ function SettingsMenu({ onClose, onReconnect, onLogoff }: Props) {
     setCustomStatuses(listCustomStatuses())
   }
   const [autoReconnect, setAutoReconnectState] = useState(getAutoReconnect)
+  const [openAtLogin, setOpenAtLoginState] = useState(false)
   const [speechEngine, setSpeechEngineState] = useState<SpeechEngineKind>(getSpeechEngineSetting)
   const [diagnostics, setDiagnostics] = useState<{
     connection: { role: string; connected: boolean; authenticated: boolean; lastActivityTime: number; reconnectDelay?: number; isConnecting?: boolean; lastRttMs?: number | null; lastPongTime?: number } | null
@@ -153,7 +154,21 @@ function SettingsMenu({ onClose, onReconnect, onLogoff }: Props) {
 
     setVoiceTimeoutsState(getVoiceTimeouts())
     setAutoReconnectState(getAutoReconnect())
+
+    // Reflect the real OS login-item state (set outside the app too)
+    window.electronAPI.getOpenAtLogin().then(setOpenAtLoginState).catch(() => {})
   }, [])
+
+  const handleOpenAtLoginChange = async (enabled: boolean) => {
+    setOpenAtLoginState(enabled) // optimistic
+    try {
+      const actual = await window.electronAPI.setOpenAtLogin(enabled)
+      setOpenAtLoginState(actual)
+    } catch {
+      // revert on failure
+      setOpenAtLoginState(!enabled)
+    }
+  }
 
   const handleReconnect = () => {
     onClose()
@@ -338,6 +353,23 @@ function SettingsMenu({ onClose, onReconnect, onLogoff }: Props) {
           </div>
           <div className="tts-info" style={{ paddingLeft: 44, paddingTop: 0, marginTop: -4 }}>
             When off, the app will not reconnect after disconnect or auth failure (connector only).
+          </div>
+
+          <div className="setting-item">
+            <span className="setting-icon" aria-hidden="true">🚀</span>
+            <span>Start with Windows</span>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={openAtLogin}
+                onChange={(e) => handleOpenAtLoginChange(e.target.checked)}
+                aria-label="Start automatically when Windows starts"
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+          <div className="tts-info" style={{ paddingLeft: 44, paddingTop: 0, marginTop: -4 }}>
+            When on, the app launches automatically each time you sign in to Windows.
           </div>
 
           <div className="setting-item">
