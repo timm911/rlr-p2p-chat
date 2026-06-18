@@ -14,6 +14,12 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '3.4.1',
+    items: [
+      '🔗 The "View on GitHub" link in Release Notes now opens the Releases page (where updates are listed)'
+    ]
+  },
+  {
     version: '3.4.0',
     items: [
       '🚀 New setting: "Start with Windows" — the app can launch automatically when you sign in (Settings, under Auto-reconnect)',

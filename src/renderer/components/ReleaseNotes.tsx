@@ -98,14 +98,14 @@ function ReleaseNotes({ onClose }: Props) {
         </div>
         <div className="release-notes-footer">
           <a
-            href="https://github.com/timm911/rlr-p2p-chat"
+            href="https://github.com/timm911/rlr-p2p-chat/releases"
             className="release-notes-github"
             onClick={(e) => {
               e.preventDefault()
-              window.electronAPI.openExternal('https://github.com/timm911/rlr-p2p-chat')
+              window.electronAPI.openExternal('https://github.com/timm911/rlr-p2p-chat/releases')
             }}
-            aria-label="Open the project on GitHub"
-            title="github.com/timm911/rlr-p2p-chat"
+            aria-label="Open the project releases on GitHub"
+            title="github.com/timm911/rlr-p2p-chat/releases"
           >
             🔗 View on GitHub
           </a>
