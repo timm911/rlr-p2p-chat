@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import StatusDropdown from './StatusDropdown'
 import MessageBubble from './MessageBubble'
 import SettingsMenu from './SettingsMenu'
@@ -1617,6 +1617,31 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
     })
   }
 
+  // Stable callback identities for memoized <MessageBubble>. The handlers above
+  // are recreated every render (and capture state like editingId), so passing
+  // them directly would defeat React.memo. These shims keep a constant identity
+  // while always invoking the latest handler via a ref — same pattern as
+  // handleStatusChangeRef / sendChatMessageRef elsewhere in this file.
+  const bubbleHandlersRef = useRef({
+    addReaction: handleAddReaction,
+    removeReaction: handleRemoveReaction,
+    reply: handleReply,
+    startEdit: handleStartEdit,
+    unsend: handleUnsend,
+  })
+  bubbleHandlersRef.current = {
+    addReaction: handleAddReaction,
+    removeReaction: handleRemoveReaction,
+    reply: handleReply,
+    startEdit: handleStartEdit,
+    unsend: handleUnsend,
+  }
+  const stableAddReaction = useCallback((id: string, emoji: string) => bubbleHandlersRef.current.addReaction(id, emoji), [])
+  const stableRemoveReaction = useCallback((id: string, emoji: string) => bubbleHandlersRef.current.removeReaction(id, emoji), [])
+  const stableReply = useCallback((m: Message) => bubbleHandlersRef.current.reply(m), [])
+  const stableStartEdit = useCallback((m: Message) => bubbleHandlersRef.current.startEdit(m), [])
+  const stableUnsend = useCallback((id: string) => bubbleHandlersRef.current.unsend(id), [])
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -2875,13 +2900,13 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
                 key={msg.id}
                 message={msg}
                 isOwn={msg.from === userIdentity}
-                onAddReaction={handleAddReaction}
-                onRemoveReaction={handleRemoveReaction}
-                onReply={handleReply}
-                onOpenReactionPicker={(messageId) => setReactionPickerFor(messageId)}
-                onOpenImage={(url) => setLightboxUrl(url)}
-                onEdit={handleStartEdit}
-                onUnsend={handleUnsend}
+                onAddReaction={stableAddReaction}
+                onRemoveReaction={stableRemoveReaction}
+                onReply={stableReply}
+                onOpenReactionPicker={setReactionPickerFor}
+                onOpenImage={setLightboxUrl}
+                onEdit={stableStartEdit}
+                onUnsend={stableUnsend}
                 showSeen={msg.id === lastSeenOwnId}
               />
             )

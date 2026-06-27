@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, memo } from 'react'
 import './MessageBubble.css'
 import type { Message } from './ChatWindow'
 import { linkifyText } from '../utils/linkify'
@@ -426,4 +426,7 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onRepl
   )
 }
 
-export default MessageBubble
+// Memoized: ChatWindow re-renders on nearly every event (typing, speech
+// preview, presence, scroll). With stable callback props from the parent,
+// React.memo skips re-rendering bubbles whose `message` reference is unchanged.
+export default memo(MessageBubble)
