@@ -895,6 +895,23 @@
   background: rgba(124, 58, 237, 1);
 }
 
+/* "Load earlier messages" pill at the top of the windowed list */
+.load-earlier-btn {
+  align-self: center;
+  margin: 6px auto 10px;
+  padding: 6px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.load-earlier-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
 /* Search bar under header */
 .search-bar {
   display: flex;

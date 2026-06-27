@@ -304,6 +304,10 @@ export function setupIPCHandlers(window: BrowserWindow): void {
   // older versions (plain JSON) are still read and get re-encrypted on save.
   const getHistoryPath = () => path.join(app.getPath('userData'), 'history.json')
   const ENC_MAGIC = 'RLRENC1:' // prefix marking a safeStorage-encrypted file
+  // Last serialized payload we wrote. Lets us skip the (relatively expensive)
+  // encrypt + fsync when a save carries byte-identical content — common when a
+  // single message cycles through delivery-status updates.
+  let lastSavedHistoryJson: string | null = null
 
   ipcMain.handle('history:load', async () => {
     try {
@@ -340,6 +344,10 @@ export function setupIPCHandlers(window: BrowserWindow): void {
         return rest
       })
       const json = JSON.stringify(toSave)
+      // Nothing changed since the last write — skip the encrypt + disk write.
+      if (json === lastSavedHistoryJson && fs.existsSync(p)) {
+        return { success: true, skipped: true }
+      }
       if (safeStorage.isEncryptionAvailable()) {
         const enc = safeStorage.encryptString(json)
         fs.writeFileSync(p, Buffer.concat([Buffer.from(ENC_MAGIC, 'utf8'), enc]))
@@ -347,6 +355,7 @@ export function setupIPCHandlers(window: BrowserWindow): void {
         // No OS keystore (rare) — fall back to plaintext so chat still saves
         fs.writeFileSync(p, json, 'utf8')
       }
+      lastSavedHistoryJson = json
       return { success: true }
     } catch (err: any) {
       console.error('Failed to save history:', err)
@@ -358,6 +367,7 @@ export function setupIPCHandlers(window: BrowserWindow): void {
     try {
       const p = getHistoryPath()
       if (fs.existsSync(p)) fs.unlinkSync(p)
+      lastSavedHistoryJson = null
       mainWindow?.webContents.send('history:cleared')
       return { success: true }
     } catch (err: any) {

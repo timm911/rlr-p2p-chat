@@ -8,6 +8,7 @@ import { isEchoOfRecentTTS, recordSpokenText } from '../utils/echo-guard'
 import { toSpokenText } from '../utils/linkify'
 import { resolveInitialVoice, getSavedVoice, setSavedVoice } from '../utils/tts-prefs'
 import { dayLabel, isNewDay } from '../utils/date-format'
+import { windowMessages, DEFAULT_RENDER_LIMIT, LOAD_MORE_STEP } from '../utils/message-window'
 import { compareVersions, CHANGELOG } from '../utils/changelog'
 import { getAutoAwayEnabled, getAutoAwayMinutes } from '../utils/auto-away'
 import { getAutoTrimEnabled, trimOldMessages } from '../utils/auto-trim'
@@ -119,6 +120,9 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
   const [isSharingScreen, setIsSharingScreen] = useState(false)
   const [viewingShareFrom, setViewingShareFrom] = useState<string | null>(null)
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null)
+  // Render windowing: how many of the most recent messages to mount in the DOM.
+  // Grows when the user pulls in older messages via "Load earlier".
+  const [renderLimit, setRenderLimit] = useState(DEFAULT_RENDER_LIMIT)
   // Scheduled messages ("Send later")
   const [showScheduler, setShowScheduler] = useState(false)
   const [showScheduledList, setShowScheduledList] = useState(false)
@@ -170,6 +174,9 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
   const noSpeechTimerRef = useRef<NodeJS.Timeout | null>(null)
   const hasSpokenRef = useRef<boolean>(false)
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  // Whether we've already told the peer we're typing in the current burst, so
+  // we send `typing:true` once per burst instead of on every keystroke.
+  const typingActiveRef = useRef<boolean>(false)
   const wasDisconnectedRef = useRef<boolean>(false)
   // Offline queue: messages composed while disconnected, flushed in order on reconnect
   const pendingQueueRef = useRef<Message[]>([])
@@ -422,12 +429,18 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
   // intentional status (Bed, Dinner, …) is never overridden.
   useEffect(() => {
     let lastActivity = Date.now()
+    // Single pointer/keyboard activity handler covering both jobs: restoring
+    // from auto-away AND refreshing the "Seen" read-receipt time. (Previously
+    // two separate effects each registered the same five high-frequency
+    // listeners.)
     const onActivity = () => {
       lastActivity = Date.now()
+      lastActivityRef.current = lastActivity
       if (autoAwayActiveRef.current) {
         autoAwayActiveRef.current = false
         handleStatusChangeRef.current(statusBeforeAwayRef.current)
       }
+      maybeMarkSeen()
     }
     const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'wheel']
     events.forEach((e) => window.addEventListener(e, onActivity, { passive: true }))
@@ -493,45 +506,39 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
     return () => window.removeEventListener('focus', onFocus)
   }, [])
 
-  // Track real user activity for "Seen": any interaction refreshes the
-  // last-active time and re-checks whether the newest message is now seen.
-  useEffect(() => {
-    const onAct = () => {
-      lastActivityRef.current = Date.now()
-      maybeMarkSeen()
-    }
-    const events = ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart']
-    events.forEach((e) => window.addEventListener(e, onAct, { passive: true }))
-    return () => events.forEach((e) => window.removeEventListener(e, onAct))
-  }, [])
+  // (Pointer/keyboard "Seen" tracking is handled by the consolidated activity
+  // listener in the auto-away effect above.)
 
-  // Typing indicator: send typing when user types, clear after 2s idle
+  // Typing indicator: send `typing:true` once when a typing burst starts, then
+  // `typing:false` after 2s idle. Throttling to the start of the burst avoids an
+  // IPC + network message on every keystroke.
   useEffect(() => {
     if (!isConnected) return
+    const sendTyping = (isTyping: boolean) => {
+      window.electronAPI.sendMessage({
+        type: 'typing',
+        payload: { isTyping, from: userIdentity },
+        timestamp: Date.now()
+      }).catch(() => {})
+    }
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current)
       typingTimeoutRef.current = null
     }
     if (inputText.trim()) {
-      window.electronAPI.sendMessage({
-        type: 'typing',
-        payload: { isTyping: true, from: userIdentity },
-        timestamp: Date.now()
-      }).catch(() => {})
+      if (!typingActiveRef.current) {
+        typingActiveRef.current = true
+        sendTyping(true)
+      }
       typingTimeoutRef.current = setTimeout(() => {
         typingTimeoutRef.current = null
-        window.electronAPI.sendMessage({
-          type: 'typing',
-          payload: { isTyping: false, from: userIdentity },
-          timestamp: Date.now()
-        }).catch(() => {})
+        typingActiveRef.current = false
+        sendTyping(false)
       }, 2000)
-    } else {
-      window.electronAPI.sendMessage({
-        type: 'typing',
-        payload: { isTyping: false, from: userIdentity },
-        timestamp: Date.now()
-      }).catch(() => {})
+    } else if (typingActiveRef.current) {
+      // Input cleared mid-burst — tell the peer we stopped right away.
+      typingActiveRef.current = false
+      sendTyping(false)
     }
     return () => {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current)
@@ -802,11 +809,13 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
     return () => { mounted = false }
   }, [])
 
-  // Debounced save of message history when messages change
+  // Debounced save of message history when messages change. 4s so bursts of
+  // delivery-status / reaction updates coalesce into a single write; the main
+  // process additionally skips the encrypt+write when the payload is unchanged.
   useEffect(() => {
     const t = setTimeout(() => {
       window.electronAPI.historySave(messages).catch(() => {})
-    }, 2000)
+    }, 4000)
     return () => clearTimeout(t)
   }, [messages])
 
@@ -2858,9 +2867,15 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
         )}
         {(() => {
           const q = searchQuery.trim().toLowerCase()
-          const visible = q
-            ? messages.filter(m => (m.content || '').toLowerCase().includes(q) || (m.fileTransfer?.fileName || '').toLowerCase().includes(q))
-            : messages
+          // When searching, scan the FULL history. Otherwise render only the
+          // most recent `renderLimit` bubbles so the DOM stays bounded as
+          // history grows (the main responsiveness win on old hardware).
+          const { visible, hiddenCount } = q
+            ? {
+                visible: messages.filter(m => (m.content || '').toLowerCase().includes(q) || (m.fileTransfer?.fileName || '').toLowerCase().includes(q)),
+                hiddenCount: 0,
+              }
+            : windowMessages(messages, renderLimit)
 
           if (messages.length === 0) {
             return (
@@ -2886,6 +2901,19 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
           // Interleave day dividers between messages from different calendar days
           let prevTs: number | null = null
           const nodes: JSX.Element[] = []
+          // Affordance to pull older messages into the rendered window
+          if (hiddenCount > 0) {
+            nodes.push(
+              <button
+                key="load-earlier"
+                type="button"
+                className="load-earlier-btn no-drag"
+                onClick={() => setRenderLimit((n) => n + LOAD_MORE_STEP)}
+              >
+                ⬆ Load earlier messages ({hiddenCount})
+              </button>
+            )
+          }
           for (const msg of visible) {
             if (isNewDay(prevTs, msg.timestamp)) {
               nodes.push(
