@@ -14,6 +14,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '3.4.2',
+    items: [
+      '⚡ Smoother and faster — the chat no longer gets sluggish in long conversations as your history grows',
+      '📜 Very long histories now show your most recent messages with a "Load earlier messages" button to pull in older ones'
+    ]
+  },
+  {
     version: '3.4.1',
     items: [
       '🔗 The "View on GitHub" link in Release Notes now opens the Releases page (where updates are listed)'

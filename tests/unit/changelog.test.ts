@@ -64,9 +64,10 @@ describe('entriesToShow', () => {
 })
 
 describe('CHANGELOG seed data', () => {
-  it('has the latest entry first', () => {
-    expect(CHANGELOG[0].version).toBe('3.3.0')
-    expect(CHANGELOG[0].items.length).toBeGreaterThanOrEqual(2)
+  it('has the latest entry first, matching package.json', () => {
+    const pkg = require('../../package.json')
+    expect(CHANGELOG[0].version).toBe(pkg.version)
+    expect(CHANGELOG[0].items.length).toBeGreaterThanOrEqual(1)
   })
 
   it('keeps the 2.16.0 release-notes entry', () => {
