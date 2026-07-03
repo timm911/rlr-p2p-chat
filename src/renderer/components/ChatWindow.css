@@ -140,6 +140,93 @@
   align-items: center;
   gap: 10px;
 }
+/* NOTE: do NOT promote .header-controls itself to a compositor layer — a
+   `transform` here creates a stacking context that traps the StatusDropdown
+   menu (an absolutely-positioned descendant) beneath the message list. The
+   drag-repaint fix promotes the leaf buttons individually instead (see
+   .icon-btn and .status-btn), which keeps the icons on their own backing
+   surface without affecting the dropdown's stacking. */
+
+/* Link-quality (ping) indicator in the header — local machine's RTT to the hub.
+   Only shown for the connector role, which is the only side that measures RTT. */
+.rtt-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  opacity: 0.85;
+  user-select: none;
+  cursor: default;
+}
+.rtt-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #9ca3af;
+}
+.rtt-indicator.good .rtt-dot { background: #4ade80; box-shadow: 0 0 6px #4ade80; }
+.rtt-indicator.ok .rtt-dot { background: #fbbf24; }
+.rtt-indicator.poor .rtt-dot { background: #f87171; }
+.rtt-ms {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+/* Pinned-messages bar (E7): slim strip under the header cycling pinned items */
+.pinned-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: rgba(124, 58, 237, 0.16);
+  border-bottom: 1px solid rgba(124, 58, 237, 0.35);
+  font-size: 12px;
+  color: var(--ink, #fff);
+}
+.pinned-icon { flex: 0 0 auto; }
+.pinned-snippet {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0;
+}
+.pinned-snippet:hover { text-decoration: underline; }
+.pinned-from { font-weight: 600; opacity: 0.9; }
+.pinned-cycle,
+.pinned-unpin {
+  flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  color: inherit;
+  font-size: 11px;
+  padding: 2px 7px;
+  cursor: pointer;
+}
+.pinned-cycle:hover,
+.pinned-unpin:hover { background: rgba(255, 255, 255, 0.22); }
+
+/* Pin action button highlight when the message is pinned */
+.emoji-btn.pin-btn.pinned {
+  background: rgba(124, 58, 237, 0.4);
+  border-radius: 6px;
+}
+
+/* Quiet-hours (DND) header badge */
+.quiet-indicator {
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0.9;
+  cursor: default;
+  user-select: none;
+}
 
 .icon-btn {
   background: rgba(255, 255, 255, 0.1);
@@ -154,6 +241,10 @@
   justify-content: center;
   font-size: 16px;
   transition: all 0.2s;
+  /* Own compositor layer so the icon survives an OS window move without
+     dropping out of the composite (Chromium 106 drag-repaint fix). Safe on a
+     leaf button — no absolutely-positioned descendants to trap. */
+  transform: translateZ(0);
 }
 
 .icon-btn:hover {
@@ -868,6 +959,61 @@
   padding: 3px 12px;
   border-radius: 12px;
   backdrop-filter: blur(6px);
+}
+
+/* "New messages" divider (E6): a colored line marking where the away-batch
+   begins, styled like the day divider but tinted with the accent. */
+.new-messages-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 16px 0 8px;
+  position: relative;
+}
+.new-messages-divider::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: rgba(124, 58, 237, 0.5);
+}
+.new-messages-divider span {
+  position: relative;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #fff;
+  background: rgba(124, 58, 237, 0.92);
+  padding: 3px 12px;
+  border-radius: 12px;
+}
+
+/* "↓ N new" floating pill — jumps to the New messages divider */
+.new-messages-pill {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(124, 58, 237, 0.95);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: transform 0.15s, background 0.15s;
+}
+.new-messages-pill:hover {
+  transform: translateY(-2px);
+  background: rgba(124, 58, 237, 1);
 }
 
 /* Jump-to-newest floating button */

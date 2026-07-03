@@ -1,8 +1,10 @@
-import { app, BrowserWindow, ipcMain, shell, globalShortcut, Menu, clipboard } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, globalShortcut, Menu, clipboard, Tray } from 'electron'
 import { join } from 'path'
+import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { setupIPCHandlers } from './ipc/handlers'
 import { getRestoredWindowOptions, trackWindowState } from './window-state'
 import { setupAutoUpdater } from './updater'
+import { getTrayIcon } from './tray-icon'
 
 // Test affordance: an alternate userData dir lets two instances run side by
 // side on one machine (used by the Playwright call smoke test). Harmless in
@@ -12,6 +14,72 @@ if (process.env.RLR_USER_DATA) {
 }
 
 let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
+// True only during a genuine quit (tray "Quit", app.quit(), auto-update
+// restart). The close-to-tray handler checks it so a real quit still closes
+// while the window's ✕ merely hides. Set from the 'before-quit' event, which
+// every quit path fires — including the updater's quitAndInstall.
+let isQuitting = false
+// "Close button hides to tray" preference. Lives in the main process (the close
+// handler needs it) and is persisted to app-settings.json in userData. Default
+// off, so behavior is unchanged unless the user opts in.
+let closeToTray = false
+let trayBalloonShown = false // one-time "still running in the tray" hint
+
+// Keep in sync with PRESET_STATUSES in src/renderer/utils/custom-statuses.ts.
+const PRESET_STATUS_LABELS = ['Talk to me', 'Listen only', 'BRB', 'Bed', 'Dinner', 'TV', 'Away', 'Company', 'Home']
+
+function getAppSettingsPath(): string {
+  return join(app.getPath('userData'), 'app-settings.json')
+}
+function loadAppSettings(): void {
+  try {
+    const p = getAppSettingsPath()
+    if (!existsSync(p)) return
+    const s = JSON.parse(readFileSync(p, 'utf8'))
+    closeToTray = !!s.closeToTray
+    trayBalloonShown = !!s.trayBalloonShown
+  } catch (_) {}
+}
+function saveAppSettings(): void {
+  try {
+    writeFileSync(getAppSettingsPath(), JSON.stringify({ closeToTray, trayBalloonShown }), 'utf8')
+  } catch (_) {}
+}
+
+function showMainWindow(): void {
+  if (!mainWindow) { createWindow(); return }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function createTray(): void {
+  if (tray) return
+  try {
+    tray = new Tray(getTrayIcon())
+  } catch (err) {
+    console.error('[Tray] Failed to create tray icon:', err)
+    return
+  }
+  tray.setToolTip('RLR P2P Chat')
+  const menu = Menu.buildFromTemplate([
+    { label: 'Open RLR P2P Chat', click: showMainWindow },
+    { type: 'separator' },
+    {
+      label: 'Set status',
+      submenu: PRESET_STATUS_LABELS.map((label) => ({
+        label,
+        click: () => mainWindow?.webContents.send('tray:set-status', label)
+      }))
+    },
+    { type: 'separator' },
+    { label: 'Quit', click: () => { isQuitting = true; app.quit() } }
+  ])
+  tray.setContextMenu(menu)
+  tray.on('click', showMainWindow)
+  tray.on('double-click', showMainWindow)
+}
 
 // Custom application menu: mirrors the standard Electron menu (full Edit
 // roles, View, Window) and adds Help → "Release Notes", which tells the
@@ -93,7 +161,30 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => {
-    mainWindow?.show()
+    // Start hidden only when explicitly launched with --hidden AND tray mode is
+    // on (future login-item integration). Normal launches always show.
+    const startHidden = process.argv.includes('--hidden') && closeToTray
+    if (!startHidden) mainWindow?.show()
+  })
+
+  // Close-to-tray: when the setting is on, the window's ✕ hides to the tray
+  // instead of quitting. A genuine quit sets isQuitting (via 'before-quit'), so
+  // the tray "Quit", app.quit(), and the auto-update restart all still close.
+  mainWindow.on('close', (e) => {
+    if (closeToTray && !isQuitting) {
+      e.preventDefault()
+      mainWindow?.hide()
+      if (!trayBalloonShown && tray) {
+        trayBalloonShown = true
+        saveAppSettings()
+        try {
+          tray.displayBalloon({
+            title: 'Still running',
+            content: 'RLR P2P Chat is still running in the tray. Right-click the tray icon to quit.'
+          })
+        } catch (_) {}
+      }
+    }
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -216,19 +307,38 @@ ipcMain.handle('app:set-open-at-login', (_event, enabled: boolean) => {
   return app.getLoginItemSettings().openAtLogin
 })
 
+// Close-to-tray preference (read by the window 'close' handler in the main
+// process; toggled from Settings in the renderer).
+ipcMain.handle('app:get-close-to-tray', () => closeToTray)
+ipcMain.handle('app:set-close-to-tray', (_event, enabled: boolean) => {
+  closeToTray = !!enabled
+  saveAppSettings()
+  return closeToTray
+})
+
 app.whenReady().then(() => {
   app.setAppUserModelId('com.rlr.p2pchat')
 
+  loadAppSettings()
   setupApplicationMenu()
   createWindow()
+  createTray()
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 
+// Any genuine quit path (tray Quit, app.quit(), auto-update quitAndInstall)
+// fires this, releasing the close-to-tray hold so the window really closes.
+app.on('before-quit', () => {
+  isQuitting = true
+})
+
 app.on('window-all-closed', () => {
   unregisterShortcuts()
+  try { tray?.destroy() } catch (_) {}
+  tray = null
   if (process.platform !== 'darwin') {
     app.quit()
   }

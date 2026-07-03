@@ -14,6 +14,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '3.5.0',
+    items: [
+      '🏠 New "Home" status',
+      '📌 Pin a message — pinned messages show in a bar under the header and sync to the other person',
+      '🖼️ "Photos & files" gallery — see every picture and file you\'ve shared in one place (button in the header)',
+      '🌙 Quiet hours — silence sounds, buzzes, and spoken messages during set hours (Settings); messages still arrive quietly',
+      '💾 Export your chat history to a web page or text file (Settings)',
+      '🆕 A "New messages" line marks where you left off, with a "↓ new" button to jump to it',
+      '🔊 Read any message aloud — a speaker button on each message',
+      '📢 Spoken announcements — hear when the other person changes status, calls, or reconnects (Settings, off by default)',
+      '📥 "Close to tray" — the ✕ button can hide the app to the system tray instead of quitting (Settings); right-click the tray icon to set your status or quit',
+      '📶 Connection quality shows your ping to the other person in the header',
+      '🐞 Fixed the top buttons disappearing when you drag the window around'
+    ]
+  },
+  {
     version: '3.4.2',
     items: [
       '⚡ Smoother and faster — the chat no longer gets sluggish in long conversations as your history grows',

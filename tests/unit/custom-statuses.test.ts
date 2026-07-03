@@ -85,6 +85,33 @@ describe('custom statuses', () => {
     expect(listCustomStatuses()).toHaveLength(1);
   });
 
+  it('includes Home as a built-in preset with its emoji', () => {
+    const home = PRESET_STATUSES.find((p) => p.label === 'Home');
+    expect(home).toBeDefined();
+    expect(home!.emoji).toBe('🏠');
+    expect(getStatusEmoji('Home')).toBe('🏠');
+    // Home is a preset now, so it can't be added as a custom
+    expect(addCustomStatus('Home', '🏠')).toBeNull();
+    expect(addCustomStatus(' home ', '🙂')).toBeNull();
+  });
+
+  it('migrates away a previously-saved custom that now collides with a preset', () => {
+    // Simulate storage written before "Home" became a built-in preset.
+    localStorage.setItem(
+      'rlrchat-custom-statuses',
+      JSON.stringify([
+        { id: 'cs-1', emoji: '🏡', label: 'Home' },
+        { id: 'cs-2', emoji: '🚜', label: 'Mowing' },
+        { id: 'cs-3', emoji: '🙂', label: 'home' }
+      ])
+    );
+    // Read filters out both "Home" and "home" (case-insensitive preset match)
+    expect(listCustomStatuses().map((s) => s.label)).toEqual(['Mowing']);
+    // ...and persists the cleaned list so it stays gone
+    const persisted = JSON.parse(localStorage.getItem('rlrchat-custom-statuses')!);
+    expect(persisted.map((s: any) => s.label)).toEqual(['Mowing']);
+  });
+
   it('dispatches the change event on add/remove', () => {
     const handler = jest.fn();
     window.addEventListener('rlr:custom-statuses-changed', handler);

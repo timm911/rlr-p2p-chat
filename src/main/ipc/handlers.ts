@@ -9,6 +9,7 @@ import { FileTransferManager, FileTransferState } from '../network/file-transfer
 import { getTTSService, TTSConfig } from '../services/tts'
 import { getWindowsSpeech, SpeechResult } from '../speech/windows-speech'
 import { getNotificationService } from '../services/notification-service'
+import { renderHistoryHtml, renderHistoryTxt } from '../history-export'
 
 let tcpServer: TCPServer | null = null
 let tcpClient: TCPClient | null = null
@@ -371,6 +372,38 @@ export function setupIPCHandlers(window: BrowserWindow): void {
       mainWindow?.webContents.send('history:cleared')
       return { success: true }
     } catch (err: any) {
+      return { success: false, error: (err as Error).message }
+    }
+  })
+
+  // Export the (decrypted) conversation to a readable file the user picks.
+  // Writes a NEW plaintext file at the chosen path — history.json itself is
+  // never touched (still encrypted at rest). Format follows the chosen
+  // extension: .html (sender-colored, day headers) or .txt (plain).
+  ipcMain.handle('history:export', async () => {
+    try {
+      const messages = loadHistoryArrayFrom(getHistoryPath())
+
+      const stamp = new Date()
+      const pad = (n: number) => String(n).padStart(2, '0')
+      const defaultName = `rlr-chat-export-${stamp.getFullYear()}-${pad(stamp.getMonth() + 1)}-${pad(stamp.getDate())}`
+
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        title: 'Export chat history',
+        defaultPath: `${defaultName}.html`,
+        filters: [
+          { name: 'Web page', extensions: ['html'] },
+          { name: 'Text file', extensions: ['txt'] }
+        ]
+      })
+      if (result.canceled || !result.filePath) return { success: false, canceled: true }
+
+      const asTxt = result.filePath.toLowerCase().endsWith('.txt')
+      const out = asTxt ? renderHistoryTxt(messages, stamp) : renderHistoryHtml(messages, stamp)
+      fs.writeFileSync(result.filePath, out, 'utf8')
+      return { success: true, path: result.filePath, count: messages.length }
+    } catch (err: any) {
+      console.error('Failed to export history:', err)
       return { success: false, error: (err as Error).message }
     }
   })

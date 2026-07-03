@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   historyLoad: () => ipcRenderer.invoke('history:load'),
   historySave: (messages: any[]) => ipcRenderer.invoke('history:save', messages),
   historyClear: () => ipcRenderer.invoke('history:clear'),
+  historyExport: () => ipcRenderer.invoke('history:export'),
   onHistoryCleared: (callback: () => void) => {
     const handler = () => callback()
     ipcRenderer.on('history:cleared', handler)
@@ -25,6 +26,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: (url: string) => ipcRenderer.invoke('window:open-external', url),
   getOpenAtLogin: () => ipcRenderer.invoke('app:get-open-at-login'),
   setOpenAtLogin: (enabled: boolean) => ipcRenderer.invoke('app:set-open-at-login', enabled),
+  getCloseToTray: () => ipcRenderer.invoke('app:get-close-to-tray'),
+  setCloseToTray: (enabled: boolean) => ipcRenderer.invoke('app:set-close-to-tray', enabled),
+  onTraySetStatus: (callback: (status: string) => void) => {
+    const handler = (_e: any, status: string) => callback(status)
+    ipcRenderer.on('tray:set-status', handler)
+    return () => ipcRenderer.removeListener('tray:set-status', handler)
+  },
 
   // Auto-update status
   onUpdateStatus: (callback: (s: { status: string; info?: any }) => void) => {
@@ -202,6 +210,7 @@ export interface ElectronAPI {
   historyLoad: () => Promise<any[]>
   historySave: (messages: any[]) => Promise<{ success: boolean; error?: string }>
   historyClear: () => Promise<{ success: boolean; error?: string }>
+  historyExport: () => Promise<{ success: boolean; canceled?: boolean; path?: string; count?: number; error?: string }>
   onHistoryCleared: (callback: () => void) => () => void
   minimizeWindow: () => void
   maximizeWindow: () => void
@@ -209,6 +218,9 @@ export interface ElectronAPI {
   openExternal: (url: string) => Promise<void>
   getOpenAtLogin: () => Promise<boolean>
   setOpenAtLogin: (enabled: boolean) => Promise<boolean>
+  getCloseToTray: () => Promise<boolean>
+  setCloseToTray: (enabled: boolean) => Promise<boolean>
+  onTraySetStatus: (callback: (status: string) => void) => () => void
   onUpdateStatus: (callback: (s: { status: string; info?: any }) => void) => () => void
   updateCheck: () => Promise<{ ok: boolean; version?: string; reason?: string }>
   updateGetVersion: () => Promise<string>

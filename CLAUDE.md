@@ -116,6 +116,7 @@ interface Message {
 - 📺 TV
 - 💤 Away
 - 👥 Company
+- 🏠 Home
 - ✏️ Custom (user types their own)
 
 **Status changes generate system messages** in chat history:

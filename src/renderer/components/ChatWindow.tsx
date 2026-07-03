@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import StatusDropdown from './StatusDropdown'
 import MessageBubble from './MessageBubble'
 import SettingsMenu from './SettingsMenu'
@@ -11,12 +11,15 @@ import { dayLabel, isNewDay } from '../utils/date-format'
 import { windowMessages, DEFAULT_RENDER_LIMIT, LOAD_MORE_STEP } from '../utils/message-window'
 import { compareVersions, CHANGELOG } from '../utils/changelog'
 import { getAutoAwayEnabled, getAutoAwayMinutes } from '../utils/auto-away'
+import { getSpeakAnnouncements } from '../utils/announce-prefs'
+import { getQuietHours, isQuietNow } from '../utils/quiet-hours'
 import { getAutoTrimEnabled, trimOldMessages } from '../utils/auto-trim'
 import { getVoiceRecorder } from '../services/voice-recorder'
 import { getVoiceCall, CallState, CallStateInfo } from '../services/voice-call'
 import { playSelectedNotification } from '../services/notification-sound'
 import { getSilenceTimeoutMs, getNoSpeechTimeoutMs } from '../utils/voice-timeouts'
 import EmojiPicker from './EmojiPicker'
+import MediaGallery from './MediaGallery'
 import ScreenshotPicker from './ScreenshotPicker'
 import ScreenShareViewer from './ScreenShareViewer'
 import { getScreenShare } from '../services/screen-share'
@@ -48,6 +51,7 @@ export interface Message {
   deliveryStatus?: 'queued' | 'sending' | 'delivered' | 'seen'
   edited?: boolean
   removed?: boolean
+  pinned?: boolean
   replyTo?: {
     id: string
     from: string
@@ -76,7 +80,7 @@ export interface Message {
   }
 }
 
-export type Status = 'Talk to me' | 'Listen only' | 'BRB' | 'Bed' | 'Dinner' | 'TV' | 'Away' | 'Company' | string
+export type Status = 'Talk to me' | 'Listen only' | 'BRB' | 'Bed' | 'Dinner' | 'TV' | 'Away' | 'Company' | 'Home' | string
 
 function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
@@ -95,6 +99,15 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
   // empty every launch — presence is live state, never restored from disk.
   const [onlinePeers, setOnlinePeers] = useState<Set<string>>(new Set())
   const [isConnected, setIsConnected] = useState(true)
+  // Link quality: round-trip time to the hub, polled from diagnostics. Only the
+  // connector (client) role measures RTT — the listener/hub returns no rtt, so
+  // this stays null there and the indicator is simply hidden. No new protocol
+  // traffic (reuses the existing ping/pong heartbeat).
+  const [rttMs, setRttMs] = useState<number | null>(null)
+  // Quiet hours (E3): whether DND is currently active — drives the 🌙 header
+  // indicator. Re-evaluated on a timer so it flips at the window boundaries.
+  // Gating decisions use the live isQuietNow(...) call, not this state.
+  const [quietActive, setQuietActive] = useState(() => isQuietNow(getQuietHours(), new Date()))
   const [replyTarget, setReplyTarget] = useState<{ id: string; from: string; snippet: string } | null>(null)
   // When set, the input edits an existing sent message instead of sending new
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -112,6 +125,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
   const callTimerRef = useRef<NodeJS.Timeout | null>(null)
   const callStartTimeRef = useRef<number>(0)
   const [showSettings, setShowSettings] = useState(false)
+  const [showGallery, setShowGallery] = useState(false)
   // Full emoji picker: input mode (insert into textarea) + reaction mode (react to a message)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [showScreenshot, setShowScreenshot] = useState(false)
@@ -143,6 +157,12 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
   // Full-screen image viewer (lightbox): the data URL of the image being viewed
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
   const [unreadCount, setUnreadCount] = useState(0)
+  // "New messages" divider (E6): id of the first message received while the
+  // window was unfocused. Renders a one-time divider above that message and
+  // drives the "↓ N new" jump pill. In-memory only, so a restart never shows a
+  // stale divider. Cleared when the user leaves the window (next away-batch
+  // starts fresh) or jumps via the pill.
+  const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null)
   const [connectionLog, setConnectionLog] = useState<Array<{ message: string; detail?: string }>>([])
   // Brief visual "Reconnected" flash on the connection log (replaces the old
   // reconnect beep, which was annoying)
@@ -395,11 +415,14 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
               }).catch(() => {})
               addSystemMessage(`⏰ Reminder sent: ${m.text}`)
             } else {
-              // Remind myself: chime + shake + spoken, right here
+              // Remind myself: chime + shake + spoken, right here. Quiet hours
+              // suppress the chime/shake/TTS; the reminder still shows.
               addSystemMessage(`⏰ Reminder: ${m.text}`)
-              if (!getSoundService().isMuted()) soundService.play('nudge')
-              triggerShake()
-              void announceViaVoice(`Reminder. ${toSpokenText(m.text)}`, myStatusRef.current)
+              if (!isQuietNow(getQuietHours(), new Date())) {
+                if (!getSoundService().isMuted()) soundService.play('nudge')
+                triggerShake()
+                void announceViaVoice(`Reminder. ${toSpokenText(m.text)}`, myStatusRef.current)
+              }
             }
             done = true
           } else {
@@ -502,8 +525,65 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
       lastActivityRef.current = Date.now()
       maybeMarkSeen()
     }
+    // Leaving the window retires the current "New messages" divider so the next
+    // away-batch gets a fresh one. The divider stays visible while focused (so
+    // the user can see where they left off after returning).
+    const onBlur = () => setFirstUnreadId(null)
     window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [])
+
+  // Link-quality poll: while connected, read the round-trip time from
+  // diagnostics every 5s (IPC only, no network traffic). Cleared when
+  // disconnected/unmounted so a stale ping never lingers.
+  useEffect(() => {
+    if (!isConnected) {
+      setRttMs(null)
+      return
+    }
+    let active = true
+    const poll = async () => {
+      try {
+        const diag = await window.electronAPI.getDiagnostics()
+        if (!active) return
+        const rtt = diag?.connection?.lastRttMs
+        setRttMs(typeof rtt === 'number' ? rtt : null)
+      } catch (_) {
+        if (active) setRttMs(null)
+      }
+    }
+    void poll()
+    const id = setInterval(poll, 5000)
+    return () => {
+      active = false
+      clearInterval(id)
+    }
+  }, [isConnected])
+
+  // Tray "Set status" submenu (E2): apply a status chosen from the system tray.
+  useEffect(() => {
+    const off = window.electronAPI.onTraySetStatus((status) => {
+      handleStatusChangeRef.current(status as Status)
+    })
+    return off
+  }, [])
+
+  // Quiet-hours indicator poll: re-evaluate every 30s so the 🌙 header badge
+  // flips on/off at the window boundaries. Also re-checks on the custom event
+  // fired when the setting changes in Settings.
+  useEffect(() => {
+    const refresh = () => setQuietActive(isQuietNow(getQuietHours(), new Date()))
+    refresh()
+    const id = setInterval(refresh, 30000)
+    window.addEventListener('rlr:quiet-hours-changed', refresh)
+    return () => {
+      clearInterval(id)
+      window.removeEventListener('rlr:quiet-hours-changed', refresh)
+    }
   }, [])
 
   // (Pointer/keyboard "Seen" tracking is handled by the consolidated activity
@@ -948,6 +1028,8 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
             window.electronAPI.setBadgeCount(n).catch(() => {})
             return n
           })
+          // Mark where the unread run starts (first of the away-batch).
+          setFirstUnreadId(prev => prev ?? chatMsg.id)
         }
         window.electronAPI.notificationShowMessage(senderName, msg.payload.content)
 
@@ -962,7 +1044,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
           if (speechStatus) {
             try { const cfg = await window.electronAPI.ttsGetConfig(); if (!cfg.enabled) playNotif = true } catch (_) {}
           }
-          if (playNotif) void playSelectedNotification()
+          if (playNotif && !isQuietNow(getQuietHours(), new Date())) void playSelectedNotification()
         }
 
         // Voice handling for "Talk to me" and "Listen only" statuses
@@ -987,6 +1069,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
         const newStatus = msg.payload.status
         if (peerStatusesRef.current[statusFrom] !== newStatus) {
           addSystemMessage(`${statusFrom} changed status to ${newStatus}`)
+          announceEvent(`${statusFrom} is now ${newStatus}`)
         }
         setPeerStatuses(prev => ({ ...prev, [statusFrom]: newStatus }))
       } else if (msg.type === 'reaction') {
@@ -1029,10 +1112,13 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
         ))
       } else if (msg.type === 'nudge') {
         addSystemMessage(`${peerName} nudged you! 👋`)
-        if (!getSoundService().isMuted()) {
-          soundService.play('nudge')
+        // Quiet hours suppress the buzz + shake (the message still shows).
+        if (!isQuietNow(getQuietHours(), new Date())) {
+          if (!getSoundService().isMuted()) {
+            soundService.play('nudge')
+          }
+          triggerShake()
         }
-        triggerShake()
       } else if (msg.type === 'app-version') {
         // Peer told us their app version. If they're on a newer build, do an
         // immediate out-of-cycle update check so we catch up without waiting
@@ -1058,13 +1144,22 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
         setMessages(prev => prev.map(m =>
           m.id === msg.payload?.id ? { ...m, removed: true, content: '' } : m
         ))
+      } else if (msg.type === 'pin' || msg.type === 'unpin') {
+        // Peer pinned/unpinned a message — reflect it locally (syncs the bar).
+        const pinned = msg.type === 'pin'
+        setMessages(prev => prev.map(m =>
+          m.id === msg.payload?.messageId ? { ...m, pinned } : m
+        ))
       } else if (msg.type === 'reminder') {
-        // A scheduled reminder fired for us — alert prominently
+        // A scheduled reminder fired for us — alert prominently. Quiet hours
+        // suppress the chime/shake/TTS; the reminder still shows in the chat.
         const text = String(msg.payload?.text || '')
         addSystemMessage(`⏰ Reminder: ${text}`)
-        if (!getSoundService().isMuted()) soundService.play('nudge')
-        triggerShake()
-        void announceViaVoice(`Reminder. ${toSpokenText(text)}`, myStatusRef.current)
+        if (!isQuietNow(getQuietHours(), new Date())) {
+          if (!getSoundService().isMuted()) soundService.play('nudge')
+          triggerShake()
+          void announceViaVoice(`Reminder. ${toSpokenText(text)}`, myStatusRef.current)
+        }
       } else if (msg.type === 'file-offer') {
         soundService.play('file-transfer-started')
         window.electronAPI.notificationShowFileTransfer(peerName, msg.payload.fileName)
@@ -1099,6 +1194,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
         // We just update the UI based on events
       } else if (msg.type === 'call-request') {
         getVoiceCall().handlePeerRequest()
+        announceEvent(`Incoming call from ${msg.payload?.from || peerName}`)
       } else if (msg.type === 'call-accept') {
         // If WE placed this call (we were ringing everyone), the first accept
         // wins — tell the other ringing machines to stop. A call rings all of
@@ -1139,6 +1235,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
           // No beep — just flash the connection log briefly
           wasDisconnectedRef.current = false
           setReconnectFlash(true)
+          announceEvent('Reconnected')
           setTimeout(() => { if (mounted) setReconnectFlash(false) }, 2200)
         }
         setIsConnected(true)
@@ -1626,6 +1723,46 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
     })
   }
 
+  // Read a single message aloud on demand (🔊 on the bubble). Works in any
+  // status — unlike the "Talk to me"/"Listen only" auto-read. Calls TTS
+  // directly so it never enters the auto-response pipeline (no mic auto-open).
+  const handleSpeakMessage = async (text: string) => {
+    const trimmed = (text || '').trim()
+    if (!trimmed) return
+    if (getSoundService().isMuted()) return // master mute silences spoken output
+    if (isQuietNow(getQuietHours(), new Date())) return // quiet hours: no TTS reading
+    // Don't disturb an in-progress auto-read/voice session: those modes already
+    // read messages aloud, and stopping mid-read would trip the mic auto-open.
+    if (isTTSSpeakingRef.current || isVoiceResponseModeRef.current || isListeningRef.current) return
+    try {
+      await window.electronAPI.ttsStop() // clear any stale/leftover speech first
+      await window.electronAPI.ttsSpeak(trimmed)
+    } catch (_) {}
+  }
+
+  // Pin/unpin a message (E7). Updates locally and tells peers via a pin/unpin
+  // message; `pinned` rides along in history so it persists and history-syncs.
+  const handleTogglePin = async (message: Message) => {
+    const nextPinned = !message.pinned
+    setMessages(prev => prev.map(m => m.id === message.id ? { ...m, pinned: nextPinned } : m))
+    await window.electronAPI.sendMessage({
+      type: nextPinned ? 'pin' : 'unpin',
+      payload: { messageId: message.id, from: userIdentity },
+      timestamp: Date.now()
+    }).catch(() => {})
+  }
+
+  // Scroll a message into view by id, expanding the render window first if the
+  // message is currently above the windowed slice.
+  const jumpToMessage = (id: string) => {
+    const el = document.getElementById(`msg-${id}`)
+    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return }
+    setRenderLimit(messages.length)
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.getElementById(`msg-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }))
+  }
+
   // Stable callback identities for memoized <MessageBubble>. The handlers above
   // are recreated every render (and capture state like editingId), so passing
   // them directly would defeat React.memo. These shims keep a constant identity
@@ -1637,6 +1774,8 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
     reply: handleReply,
     startEdit: handleStartEdit,
     unsend: handleUnsend,
+    speak: handleSpeakMessage,
+    togglePin: handleTogglePin,
   })
   bubbleHandlersRef.current = {
     addReaction: handleAddReaction,
@@ -1644,12 +1783,43 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
     reply: handleReply,
     startEdit: handleStartEdit,
     unsend: handleUnsend,
+    speak: handleSpeakMessage,
+    togglePin: handleTogglePin,
   }
   const stableAddReaction = useCallback((id: string, emoji: string) => bubbleHandlersRef.current.addReaction(id, emoji), [])
   const stableRemoveReaction = useCallback((id: string, emoji: string) => bubbleHandlersRef.current.removeReaction(id, emoji), [])
   const stableReply = useCallback((m: Message) => bubbleHandlersRef.current.reply(m), [])
   const stableStartEdit = useCallback((m: Message) => bubbleHandlersRef.current.startEdit(m), [])
   const stableUnsend = useCallback((id: string) => bubbleHandlersRef.current.unsend(id), [])
+  const stableSpeak = useCallback((text: string) => bubbleHandlersRef.current.speak(text), [])
+  const stableTogglePin = useCallback((m: Message) => bubbleHandlersRef.current.togglePin(m), [])
+
+  // Pinned messages (E7): the pinned bar cycles through these, newest last.
+  const pinnedMessages = useMemo(() => messages.filter(m => m.pinned && !m.removed), [messages])
+  const [pinnedIndex, setPinnedIndex] = useState(0)
+
+  // "New messages" count (from the first unread to the end) — drives the jump pill.
+  const newMessagesCount = useMemo(() => {
+    if (!firstUnreadId) return 0
+    const i = messages.findIndex(m => m.id === firstUnreadId)
+    return i >= 0 ? messages.length - i : 0
+  }, [messages, firstUnreadId])
+
+  // Jump to the "New messages" divider. If it's above the rendered window,
+  // expand the window first (reusing the Load-earlier mechanism) then scroll.
+  const jumpToNewMessages = () => {
+    const scroll = () => {
+      const el = document.querySelector('.new-messages-divider')
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      else messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    }
+    if (firstUnreadId && newMessagesCount > renderLimit) {
+      setRenderLimit(messages.length)
+      requestAnimationFrame(() => requestAnimationFrame(scroll))
+    } else {
+      scroll()
+    }
+  }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1863,6 +2033,7 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
   const announceViaVoice = async (spoken: string, status: Status) => {
     if (!spoken.trim()) return
     if (soundService.isMuted()) return // master mute silences spoken output
+    if (isQuietNow(getQuietHours(), new Date())) return // quiet hours: no TTS reading
     if (status !== 'Talk to me' && status !== 'Listen only') return
     try {
       const ttsConfig = await window.electronAPI.ttsGetConfig()
@@ -1901,6 +2072,30 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
       console.error('[TTS] Error:', error)
       addSystemMessage('TTS error: ' + (error as Error).message)
     }
+  }
+
+  // Spoken announcements (E9): read a short peer event aloud when the setting is
+  // on AND the local user is in a speech status. Speaks TTS DIRECTLY (never via
+  // the auto-response queue) so it never opens the mic. Skips whenever a message
+  // is being read or the user is dictating — announcements are ephemeral, so we
+  // drop them rather than talk over content. No await before ttsSpeak, so the
+  // guard and the speak can't be split by an incoming-message read.
+  const announceEvent = (text: string) => {
+    if (!text.trim()) return
+    if (!getSpeakAnnouncements()) return
+    if (soundService.isMuted()) return
+    const st = myStatusRef.current
+    if (st !== 'Talk to me' && st !== 'Listen only') return
+    if (isQuietNow(getQuietHours(), new Date())) return // quiet hours: no announcements
+    if (
+      isTTSSpeakingRef.current ||
+      isVoiceResponseModeRef.current ||
+      isVoiceQueueProcessingRef.current ||
+      isListenOnlyQueueProcessingRef.current ||
+      isListeningRef.current
+    ) return
+    // Main-process TTS returns early if disabled, so no need to pre-check config.
+    void window.electronAPI.ttsSpeak(text).catch(() => {})
   }
 
   // Process voice queue: read all messages back-to-back, then start listening
@@ -2515,6 +2710,23 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
         </div>
 
         <div className="header-controls no-drag">
+          {quietActive && (
+            <span className="quiet-indicator" title="Quiet hours active — sounds & speech are silenced" role="img" aria-label="Quiet hours active">
+              🌙
+            </span>
+          )}
+          {isConnected && rttMs !== null && (
+            <span
+              className={`rtt-indicator ${rttMs < 100 ? 'good' : rttMs < 300 ? 'ok' : 'poor'}`}
+              title={`Ping: ${rttMs} ms`}
+              role="img"
+              aria-label={`Connection quality: ${rttMs < 100 ? 'good' : rttMs < 300 ? 'fair' : 'poor'} (ping ${rttMs} milliseconds)`}
+            >
+              <span className="rtt-dot" aria-hidden="true" />
+              <span className="rtt-ms" aria-hidden="true">{rttMs}ms</span>
+            </span>
+          )}
+
           <StatusDropdown currentStatus={myStatus} onStatusChange={handleStatusChange} />
 
           <button
@@ -2558,6 +2770,15 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
           </button>
 
           <button
+            className={`icon-btn ${showGallery ? 'active' : ''}`}
+            onClick={() => setShowGallery(true)}
+            title="Photos & files"
+            aria-label="Open photos and files gallery"
+          >
+            🖼️
+          </button>
+
+          <button
             className={`icon-btn ${isMuted ? 'muted' : ''}`}
             onClick={toggleMute}
             title={isMuted ? 'Unmute (speech & sounds off)' : 'Mute speech & sounds'}
@@ -2577,6 +2798,43 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
           </button>
         </div>
       </div>
+
+      {pinnedMessages.length > 0 && (() => {
+        const idx = pinnedIndex % pinnedMessages.length
+        const pm = pinnedMessages[idx]
+        const snippet = pm.type === 'file' ? (pm.fileTransfer?.fileName || 'File') : (pm.content || '')
+        return (
+          <div className="pinned-bar no-drag">
+            <span className="pinned-icon" aria-hidden="true">📌</span>
+            <button
+              className="pinned-snippet"
+              onClick={() => jumpToMessage(pm.id)}
+              title="Jump to pinned message"
+              aria-label={`Jump to pinned message from ${pm.from}`}
+            >
+              <span className="pinned-from">{pm.from}:</span> {snippet}
+            </button>
+            {pinnedMessages.length > 1 && (
+              <button
+                className="pinned-cycle"
+                onClick={() => setPinnedIndex(i => (i + 1) % pinnedMessages.length)}
+                aria-label="Show next pinned message"
+                title="Next pinned"
+              >
+                {idx + 1}/{pinnedMessages.length} ›
+              </button>
+            )}
+            <button
+              className="pinned-unpin"
+              onClick={() => handleTogglePin(pm)}
+              aria-label="Unpin this message"
+              title="Unpin"
+            >
+              ✕
+            </button>
+          </div>
+        )
+      })()}
 
       {showSearch && (
         <div className="search-bar no-drag">
@@ -2627,6 +2885,15 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
           }}
           onReconnect={onDisconnect}
           onLogoff={onLogoff}
+        />
+      )}
+
+      {/* Shared media gallery — read-only view of all photos & files */}
+      {showGallery && (
+        <MediaGallery
+          messages={messages}
+          onClose={() => setShowGallery(false)}
+          onOpenImage={(url) => { setShowGallery(false); setLightboxUrl(url) }}
         />
       )}
 
@@ -2923,6 +3190,13 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
               )
             }
             prevTs = msg.timestamp
+            if (firstUnreadId && msg.id === firstUnreadId) {
+              nodes.push(
+                <div className="new-messages-divider" key={`newmsgs-${msg.id}`}>
+                  <span>New messages</span>
+                </div>
+              )
+            }
             nodes.push(
               <MessageBubble
                 key={msg.id}
@@ -2935,6 +3209,8 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
                 onOpenImage={setLightboxUrl}
                 onEdit={stableStartEdit}
                 onUnsend={stableUnsend}
+                onSpeak={stableSpeak}
+                onTogglePin={stableTogglePin}
                 showSeen={msg.id === lastSeenOwnId}
               />
             )
@@ -2942,7 +3218,17 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
           return nodes
         })()}
         <div ref={messagesEndRef} />
-        {showJumpToBottom && (
+        {showJumpToBottom && firstUnreadId && newMessagesCount > 0 && (
+          <button
+            className="new-messages-pill no-drag"
+            onClick={jumpToNewMessages}
+            aria-label={`Jump to ${newMessagesCount} new message${newMessagesCount === 1 ? '' : 's'}`}
+            title="Jump to new messages"
+          >
+            ↓ {newMessagesCount} new
+          </button>
+        )}
+        {showJumpToBottom && !firstUnreadId && (
           <button
             className="jump-to-bottom no-drag"
             onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })}

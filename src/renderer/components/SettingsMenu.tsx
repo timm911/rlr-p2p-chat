@@ -12,6 +12,8 @@ import { getAutoAwayEnabled, setAutoAwayEnabled, getAutoAwayMinutes, setAutoAway
 import { getAutoTrimEnabled, setAutoTrimEnabled } from '../utils/auto-trim'
 import { SOUND_OPTIONS, getSelectedSound, setSelectedSound, previewSound, preloadSelected, listCustomSounds, addCustomSound, removeCustomSound, CustomSound } from '../services/notification-sound'
 import { getAutoReconnect, setAutoReconnect } from '../utils/connection-settings'
+import { getSpeakAnnouncements, setSpeakAnnouncements } from '../utils/announce-prefs'
+import { getQuietHours, setQuietHours } from '../utils/quiet-hours'
 import { getSpeechEngineSetting, setSpeechEngineSetting, SpeechEngineKind } from '../services/speech-engine'
 import { listCustomStatuses, addCustomStatus, removeCustomStatus, DEFAULT_STATUS_EMOJI, CustomStatus } from '../utils/custom-statuses'
 import EmojiPicker from './EmojiPicker'
@@ -57,6 +59,26 @@ function SettingsMenu({ onClose, onReconnect, onLogoff }: Props) {
   const [autoAway, setAutoAwayState] = useState(getAutoAwayEnabled)
   const [autoAwayMin, setAutoAwayMinState] = useState(getAutoAwayMinutes)
   const [autoTrim, setAutoTrimState] = useState(getAutoTrimEnabled)
+  const [speakAnnouncements, setSpeakAnnouncementsState] = useState(getSpeakAnnouncements)
+  const [quietHours, setQuietHoursState] = useState(getQuietHours)
+  const [exportMsg, setExportMsg] = useState<string>('')
+  const handleExportHistory = async () => {
+    setExportMsg('')
+    try {
+      const r = await window.electronAPI.historyExport()
+      if (r.canceled) return
+      if (r.success) setExportMsg(`Exported ${r.count ?? 0} messages.`)
+      else setExportMsg(`Export failed: ${r.error || 'unknown error'}`)
+    } catch (e: any) {
+      setExportMsg(`Export failed: ${e?.message || 'unknown error'}`)
+    }
+  }
+  const applyQuiet = (next: ReturnType<typeof getQuietHours>) => {
+    setQuietHoursState(next)
+    setQuietHours(next)
+    // Let the chat header's 🌙 indicator re-evaluate immediately.
+    window.dispatchEvent(new Event('rlr:quiet-hours-changed'))
+  }
   const [showNotifSound, setShowNotifSound] = useState(false)
   const [notifSound, setNotifSound] = useState(getSelectedSound)
   // Saved custom sound files (the legacy single custom is migrated into the
@@ -118,6 +140,7 @@ function SettingsMenu({ onClose, onReconnect, onLogoff }: Props) {
   }
   const [autoReconnect, setAutoReconnectState] = useState(getAutoReconnect)
   const [openAtLogin, setOpenAtLoginState] = useState(false)
+  const [closeToTray, setCloseToTrayState] = useState(false)
   const [speechEngine, setSpeechEngineState] = useState<SpeechEngineKind>(getSpeechEngineSetting)
   const [diagnostics, setDiagnostics] = useState<{
     connection: { role: string; connected: boolean; authenticated: boolean; lastActivityTime: number; reconnectDelay?: number; isConnecting?: boolean; lastRttMs?: number | null; lastPongTime?: number } | null
@@ -157,7 +180,18 @@ function SettingsMenu({ onClose, onReconnect, onLogoff }: Props) {
 
     // Reflect the real OS login-item state (set outside the app too)
     window.electronAPI.getOpenAtLogin().then(setOpenAtLoginState).catch(() => {})
+    window.electronAPI.getCloseToTray().then(setCloseToTrayState).catch(() => {})
   }, [])
+
+  const handleCloseToTrayChange = async (enabled: boolean) => {
+    setCloseToTrayState(enabled) // optimistic
+    try {
+      const actual = await window.electronAPI.setCloseToTray(enabled)
+      setCloseToTrayState(actual)
+    } catch {
+      setCloseToTrayState(!enabled)
+    }
+  }
 
   const handleOpenAtLoginChange = async (enabled: boolean) => {
     setOpenAtLoginState(enabled) // optimistic
@@ -322,6 +356,14 @@ function SettingsMenu({ onClose, onReconnect, onLogoff }: Props) {
             <span>Release notes</span>
           </button>
 
+          <button className="setting-item" onClick={handleExportHistory} aria-label="Export chat history">
+            <span className="setting-icon" aria-hidden="true">💾</span>
+            <span>Export chat history…</span>
+          </button>
+          {exportMsg && (
+            <div className="tts-info" style={{ paddingLeft: 44, paddingTop: 0, marginTop: -4 }}>{exportMsg}</div>
+          )}
+
           <div className="setting-divider" />
 
           <button className="setting-item" onClick={handleReconnect} aria-label="Change connection settings">
@@ -373,6 +415,24 @@ function SettingsMenu({ onClose, onReconnect, onLogoff }: Props) {
           </div>
 
           <div className="setting-item">
+            <span className="setting-icon" aria-hidden="true">📥</span>
+            <span>Close button hides to tray</span>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={closeToTray}
+                onChange={(e) => handleCloseToTrayChange(e.target.checked)}
+                aria-label="Close button hides to the system tray"
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+          <div className="tts-info" style={{ paddingLeft: 44, paddingTop: 0, marginTop: -4 }}>
+            When on, the window's close button hides the app to the system tray instead
+            of quitting. Right-click the tray icon to quit or set your status.
+          </div>
+
+          <div className="setting-item">
             <span className="setting-icon" aria-hidden="true">💤</span>
             <span>Auto-away when idle</span>
             <label className="toggle-switch">
@@ -413,6 +473,71 @@ function SettingsMenu({ onClose, onReconnect, onLogoff }: Props) {
               </div>
             </div>
           )}
+
+          <div className="setting-item">
+            <span className="setting-icon" aria-hidden="true">📢</span>
+            <span>Speak announcements</span>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={speakAnnouncements}
+                onChange={(e) => {
+                  const v = e.target.checked
+                  setSpeakAnnouncementsState(v)
+                  setSpeakAnnouncements(v)
+                }}
+                aria-label="Speak announcements aloud"
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+          <div className="tts-info" style={{ paddingLeft: 44, paddingTop: 0, marginTop: -4 }}>
+            When on and your status is "Talk to me" or "Listen only", the app reads
+            out peer events aloud (status changes, incoming calls, reconnects).
+          </div>
+
+          <div className="setting-item">
+            <span className="setting-icon" aria-hidden="true">🌙</span>
+            <span>Quiet hours</span>
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={quietHours.enabled}
+                onChange={(e) => applyQuiet({ ...quietHours, enabled: e.target.checked })}
+                aria-label="Enable quiet hours"
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+          {quietHours.enabled && (
+            <div className="tts-settings-panel" style={{ paddingTop: 8 }}>
+              <div className="tts-setting-row">
+                <label htmlFor="quiet-start">From</label>
+                <input
+                  id="quiet-start"
+                  type="time"
+                  value={quietHours.start}
+                  onChange={(e) => applyQuiet({ ...quietHours, start: e.target.value })}
+                  aria-label="Quiet hours start time"
+                />
+              </div>
+              <div className="tts-setting-row">
+                <label htmlFor="quiet-end">To</label>
+                <input
+                  id="quiet-end"
+                  type="time"
+                  value={quietHours.end}
+                  onChange={(e) => applyQuiet({ ...quietHours, end: e.target.value })}
+                  aria-label="Quiet hours end time"
+                />
+              </div>
+            </div>
+          )}
+          <div className="tts-info" style={{ paddingLeft: 44, paddingTop: 0, marginTop: -4 }}>
+            During quiet hours, notification sounds, the nudge buzz, reminder chimes,
+            and spoken messages are silenced. Messages still arrive and the unread
+            count still updates. Overnight ranges (e.g. 10 PM–8 AM) are supported.
+          </div>
 
           <div className="setting-divider" />
 

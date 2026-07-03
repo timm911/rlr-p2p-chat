@@ -27,8 +27,15 @@ export const PRESET_STATUSES: { emoji: string; label: string }[] = [
   { emoji: '🍽️', label: 'Dinner' },
   { emoji: '📺', label: 'TV' },
   { emoji: '💤', label: 'Away' },
-  { emoji: '👥', label: 'Company' }
+  { emoji: '👥', label: 'Company' },
+  { emoji: '🏠', label: 'Home' }
 ]
+
+/** True if a label collides (case-insensitive) with a built-in preset. */
+function collidesWithPreset(label: string): boolean {
+  const lower = label.toLowerCase()
+  return PRESET_STATUSES.some((p) => p.label.toLowerCase() === lower)
+}
 
 export const DEFAULT_STATUS_EMOJI = '💬'
 export const CUSTOM_STATUSES_CHANGED_EVENT = 'rlr:custom-statuses-changed'
@@ -41,13 +48,22 @@ export function listCustomStatuses(): CustomStatus[] {
     if (!raw) return []
     const list = JSON.parse(raw)
     if (!Array.isArray(list)) return []
-    return list.filter(
+    const valid = list.filter(
       (s): s is CustomStatus =>
         !!s &&
         typeof s.id === 'string' &&
         typeof s.emoji === 'string' &&
         typeof s.label === 'string'
     )
+    // One-time migration: drop any saved custom whose label now collides with a
+    // preset (e.g. someone saved "Home" before it became a built-in). Keeps the
+    // dropdown free of duplicates for any preset added now or in the future.
+    // Persist quietly (no change event) — this is a silent cleanup on read.
+    const cleaned = valid.filter((s) => !collidesWithPreset(s.label))
+    if (cleaned.length !== valid.length) {
+      try { localStorage.setItem(KEY, JSON.stringify(cleaned)) } catch (_) {}
+    }
+    return cleaned
   } catch (_) {
     return []
   }
@@ -67,7 +83,7 @@ export function addCustomStatus(label: string, emoji?: string): CustomStatus | n
   const trimmed = (label || '').trim()
   if (!trimmed) return null
   const lower = trimmed.toLowerCase()
-  if (PRESET_STATUSES.some((p) => p.label.toLowerCase() === lower)) return null
+  if (collidesWithPreset(trimmed)) return null
   const list = listCustomStatuses()
   if (list.some((s) => s.label.toLowerCase() === lower)) return null
   const status: CustomStatus = {

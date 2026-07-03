@@ -28,6 +28,10 @@ interface Props {
   onEdit?: (message: Message) => void
   /** Unsend (remove) your own recent message */
   onUnsend?: (messageId: string) => void
+  /** Read this message aloud via TTS (🔊 action). Text messages only. */
+  onSpeak?: (text: string) => void
+  /** Pin or unpin this message (📌 action); syncs to peers. */
+  onTogglePin?: (message: Message) => void
   showSeen?: boolean
 }
 
@@ -42,7 +46,7 @@ function senderClass(from: string): string {
 
 const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '🔥']
 
-function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onReply, onOpenReactionPicker, onOpenImage, onEdit, onUnsend, showSeen }: Props) {
+function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onReply, onOpenReactionPicker, onOpenImage, onEdit, onUnsend, onSpeak, onTogglePin, showSeen }: Props) {
   // Your own text messages can always be edited or unsent (no time limit)
   const canEditUnsend = isOwn && message.type === 'chat' && !message.removed
   const [showReactionPicker, setShowReactionPicker] = useState(false)
@@ -122,7 +126,7 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onRepl
   if (message.type === 'file' && message.fileTransfer) {
     const { fileTransfer } = message
     return (
-      <div className={`message-wrapper ${isOwn ? 'sent' : 'received'}`}>
+      <div className={`message-wrapper ${isOwn ? 'sent' : 'received'}`} id={`msg-${message.id}`}>
         <div
           className={`message-bubble file-message ${senderClass(message.from)}`}
           onMouseEnter={() => setShowReactionPicker(true)}
@@ -161,6 +165,17 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onRepl
               >
                 ↩️
               </button>
+              {onTogglePin && (
+                <button
+                  className={`emoji-btn pin-btn ${message.pinned ? 'pinned' : ''}`}
+                  onClick={() => onTogglePin(message)}
+                  aria-label={message.pinned ? 'Unpin this message' : 'Pin this message'}
+                  title={message.pinned ? 'Unpin' : 'Pin'}
+                  type="button"
+                >
+                  📌
+                </button>
+              )}
             </div>
           )}
           <div className="file-transfer-card">
@@ -282,7 +297,7 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onRepl
   }
 
   return (
-    <div className={`message-wrapper ${isOwn ? 'sent' : 'received'}`}>
+    <div className={`message-wrapper ${isOwn ? 'sent' : 'received'}`} id={`msg-${message.id}`}>
       <div
         className={`message-bubble ${senderClass(message.from)}`}
         onMouseEnter={() => setShowReactionPicker(true)}
@@ -321,6 +336,28 @@ function MessageBubble({ message, isOwn, onAddReaction, onRemoveReaction, onRepl
             >
               ↩️
             </button>
+            {onSpeak && !message.removed && message.content.trim() && (
+              <button
+                className="emoji-btn speak-btn"
+                onClick={() => onSpeak(message.content)}
+                aria-label="Read this message aloud"
+                title="Read aloud"
+                type="button"
+              >
+                🔊
+              </button>
+            )}
+            {onTogglePin && !message.removed && (
+              <button
+                className={`emoji-btn pin-btn ${message.pinned ? 'pinned' : ''}`}
+                onClick={() => onTogglePin(message)}
+                aria-label={message.pinned ? 'Unpin this message' : 'Pin this message'}
+                title={message.pinned ? 'Unpin' : 'Pin'}
+                type="button"
+              >
+                📌
+              </button>
+            )}
             {canEditUnsend && onEdit && (
               <button
                 className="emoji-btn edit-btn"

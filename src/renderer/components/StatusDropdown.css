@@ -14,6 +14,10 @@
   align-items: center;
   gap: 8px;
   transition: all 0.3s;
+  /* Own compositor layer so the button survives an OS window move without
+     dropping out of the composite (Chromium 106 drag-repaint fix — matches
+     .header-controls / .icon-btn in ChatWindow.css). */
+  transform: translateZ(0);
 }
 
 .status-btn:hover {

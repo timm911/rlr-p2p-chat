@@ -1,0 +1,17 @@
+/* Tray icon embedded as base64 PNGs (16px + 32px) so it works in both
+ * dev and packaged builds without depending on a bundled file path or any
+ * electron-builder change. Built from build/icons/icon-16.png / icon-32.png. */
+import { nativeImage } from 'electron'
+
+const PNG_16 = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABmJLR0QA/wD/AP+gvaeTAAAB6UlEQVQ4jZWTzUuUURSHn/vOO39AKKXRh26CCCFo/gMTomEghnAR7Vy6ick21sKVFbisRRBFRvtg0Apx0SYJ2qQrSUHRoSknFTKc8b33/FqMM37NQs/m3sV5zuH3XK6jRb3IFdt9Sn3IXcQCAS3vEE8NFXOVw73uAJj/2BmUPJZ0F5GSCUlIIFMQGk87Pzw42V8+MuD5rYmrztmEpLPUgf0wEiAho+TMbt6bvj3bHLC7+dsxYCRhCqs1fObh9J1fMUBQ8qQBX+49T+eVNqgzNC+CldkKcx8WMdm5lBgFBtyusHIj88C7G0RxdNSsICSBZ/n3mAIm86SsI6rb3hMWxRHl+Q0Atirb/Ktsg6A8v0EqnWrABIU4ScL1yJm69mcGWFvYRCa2/lT5W6liQawtbAJqwJgCInTHkiSxJ8xET7YbgI5Lp5oJerJdSDRhk2F4i2VuSahp+8fnEheuncZFrh684VBi8WtpD66fy24sV2xPe/9TIj70VPsbD26u333aameioWKuIvT2hDAmez0yU1iPANLOD8sonQBeSag+AogABif7yxaRNYXV48CmJDv25cHv5gCA+5/y32v4jMlemcy3yiyFlwnVzNOZwlzL39io0d43bX4n6TOnLm9BUlhKW21qZKawfrj3P2ahB47rPYBjAAAAAElFTkSuQmCC'
+const PNG_32 = 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABmJLR0QA/wD/AP+gvaeTAAAD/ElEQVRYhb3XXWxTVQAH8P+57fppKSzgEsMLkxgejBpjSIgv6wM8ONmQZMaI0fDUB4wz8tFHz4sPYyBTEklIMGJ80GGMbKKBLVlBGU9VNHEk2yCZOnWj2UfbtWt77/n7cNu7rr0tW7d6Hvpxcnt+/3Pu+bgFNlCklJqUUttIG2KtF/YeuO73+bIdFNivGXieAk+R9IIAgQyIcVLFCG3Io2kD4cGD6U0J8PGR77c4M8ZJKHYTCIBmPWnKNL+AhXoQIJkgRF+2SZyJDHQm6w7wySuDRwH0gNzBQuNrwAvXACBnBXGq+8bhy+sK0N/V75hTng+UEhGQqBNf+ax40TcffzscC+cfGUC2jThbmlNXSby0KTgBmi/XEnrzIRkN6aVexQxuaU6dawAOgu0BR/xszREo3PNPG4CDVOa74lunRl77vCLApY6rgWWHNiHIlnJ8284Agk/4IcRKvQWUgMVCRcz9lcTcVHI1ToJQDzNutVv+8EYCAJzFH+UcjoigqsCffbkVe4/sWceOUUxB3P5sDD9/M16Kg+QO1zKOA3gfKMyB3gPX/aR6x27Yn27fVQcOAALPdbSW44Xbwm7Z1e+yAvh82Y5qm4xvq7sO3Cz+Zk8FThIKKijiyyErAAX2V5tw6+o9yyuEHW4aSnVaAYQSL9jhLGlw4sdp3LrwG5SurLrYlQnErkxYuKEr3LzwKyZ/mrYS2eHmbdD3WQEAttbCAeDB6D8YG/oD2aWVzWxsaAr3hqesnueW8hgb/hP37/xrDYcdbq4KPAkAQraNOLdvSeSrrfPw1+0AzN7llvLwBlfmRC5thnF5m6y6zGIWbr8TmtPs29n2r2xwM5RwTDc5i1CtTQYAHE5tFV4OF4s36Fr1vRpOKAoAmoyGdAJL1XA9a1QgxWseVZnPGdVwkEzJqNTNVUDer7a9zozP14UDwN/34tVwkJwECjshFWJC4Bm7vX3k/F3sfX0Ptu8Kwul2VGDFqVbq57I6Zh/M49blu/Y4CAVj1AoAIW6APGp3sCRmMxg+94v9wWK/ydQadqteUQwAhWXo0bQBkolyvOaptgGc4IJn8WHUChAePJgmRN//hEORffJ3mbMCAEBTJtcLcqbROMlZJdIfFl0rwLHoqylBRBqMQ8E4fvp2JFkRAADMp1dxvmG4MPp6Rt/9otSseCZczG19D8S1zcYJ9Z23aeFkuVcRQEZD+s5tRifAnk3EL85lPYdlVOrlXs3T/nToyzcpVC/Jx+vEZxSME+XDvuYAANDz4qWA4XKfANmtoIJrXecgP3K5tDMyeixVq/01P+/Irn6XYybdpgQOgfo+ArtJPlbAkyQnSXWHgt+6FuI3i+u8oUVCahIb+3v+HwAdGkh14xq/AAAAAElFTkSuQmCC'
+
+/** Build the tray icon as a nativeImage. Adds the 16px representation for the
+ * standard (non-HiDPI) taskbar tray, with the 32px as the 2x variant. */
+export function getTrayIcon() {
+  const img = nativeImage.createFromDataURL(`data:image/png;base64,${PNG_16}`)
+  try {
+    img.addRepresentation({ scaleFactor: 2, dataURL: `data:image/png;base64,${PNG_32}` })
+  } catch (_) {}
+  return img
+}
