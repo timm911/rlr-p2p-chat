@@ -14,6 +14,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '3.6.1',
+    items: [
+      '🐞 The "Debug Console" button in Settings now actually opens the developer console (it did nothing before)',
+      '🎤 If the high-quality Vosk voice engine can\'t start and falls back to Windows Speech, the chat now tells you — this explains sudden low-accuracy ("gibberish") dictation'
+    ]
+  },
+  {
     version: '3.6.0',
     items: [
       '🏷️ The tray "Set status" menu now lists your custom statuses too, not just the built-in presets',

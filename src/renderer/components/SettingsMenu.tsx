@@ -216,7 +216,9 @@ function SettingsMenu({ onClose, onReconnect, onLogoff }: Props) {
   }
 
   const handleOpenDevTools = () => {
-    // F12 already opens dev tools, but provide button too
+    // F12 also opens DevTools, but some setups swallow it — so this button
+    // asks the main process to open the console directly.
+    try { window.electronAPI.openDevTools() } catch (_) {}
     onClose()
   }
 

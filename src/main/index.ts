@@ -340,6 +340,17 @@ ipcMain.on('custom-statuses:sync', (_event, list: { emoji: string; label: string
   if (tray) tray.setContextMenu(buildTrayMenu())
 })
 
+// In-app "Debug Console" button (Settings) opens DevTools without needing F12,
+// which some setups swallow. Force-open (don't toggle) so the button reliably
+// shows the console.
+ipcMain.on('debug:open-devtools', () => {
+  try {
+    mainWindow?.webContents.openDevTools({ mode: 'detach' })
+  } catch (err) {
+    console.error('[Debug] Failed to open DevTools:', err)
+  }
+})
+
 app.whenReady().then(() => {
   app.setAppUserModelId('com.rlr.p2pchat')
 

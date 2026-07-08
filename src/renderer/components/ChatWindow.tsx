@@ -824,11 +824,18 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
       setIsListening(false)
     })
 
+    const offSpeechNotice = engine.onNotice((notice) => {
+      if (!isMounted) return
+      console.warn('[Speech] Notice:', notice)
+      addSystemMessage(notice)
+    })
+
     return () => {
       isMounted = false
       offSpeechStateChange()
       offSpeechResult()
       offSpeechError()
+      offSpeechNotice()
       // Stop speech when component unmounts
       void engine.stop()
     }

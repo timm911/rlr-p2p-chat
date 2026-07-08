@@ -44,7 +44,11 @@ class SpeechEngine {
   private stateCallbacks = new Set<(state: string) => void>()
   private resultCallbacks = new Set<(result: SpeechEngineResult) => void>()
   private errorCallbacks = new Set<(error: string) => void>()
+  private noticeCallbacks = new Set<(notice: string) => void>()
   private unsubscribers: Array<() => void> = []
+  // Only announce a Vosk->SAPI fallback once per app run so a broken model
+  // doesn't spam a system message on every mic press.
+  private fallbackNoticeShown = false
 
   constructor() {
     // Subscribe once to both engines; events are forwarded only from the
@@ -89,6 +93,12 @@ class SpeechEngine {
     return () => this.errorCallbacks.delete(cb)
   }
 
+  /** Non-fatal notices, e.g. "Vosk unavailable, using Windows Speech". */
+  onNotice(cb: (notice: string) => void): () => void {
+    this.noticeCallbacks.add(cb)
+    return () => this.noticeCallbacks.delete(cb)
+  }
+
   /** Warm up the Vosk model so the first mic press has no load delay. */
   preload(): void {
     if (getSpeechEngineSetting() === 'vosk') {
@@ -107,6 +117,15 @@ class SpeechEngine {
       } catch (err: any) {
         console.warn('[SpeechEngine] Vosk failed, falling back to Windows SAPI:', err?.message)
         this.activeEngine = null
+        // Vosk is the high-quality engine; SAPI is a low-accuracy fallback and
+        // the usual cause of "gibberish" dictation. Surface it once so the user
+        // knows why quality dropped and can investigate (Settings → Speech).
+        if (!this.fallbackNoticeShown) {
+          this.fallbackNoticeShown = true
+          this.emitNotice(
+            `Voice input: the Vosk engine could not start (${err?.message || 'unknown error'}), so Windows Speech (SAPI) is being used — its accuracy is much lower. See Settings → Speech Recognition. (Shown once.)`
+          )
+        }
       }
     }
 
@@ -136,6 +155,10 @@ class SpeechEngine {
 
   private emitError(error: string): void {
     this.errorCallbacks.forEach((cb) => cb(error))
+  }
+
+  private emitNotice(notice: string): void {
+    this.noticeCallbacks.forEach((cb) => cb(notice))
   }
 }
 
