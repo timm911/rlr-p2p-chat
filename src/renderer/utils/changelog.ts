@@ -14,6 +14,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '3.6.0',
+    items: [
+      '🏷️ The tray "Set status" menu now lists your custom statuses too, not just the built-in presets',
+      '🔇 A muted-speaker icon shows next to a person\'s name in the header when they\'ve muted notifications',
+      '🎙️ Manual mic dictation now stops listening on its own after a few seconds of silence — no need to click the mic again'
+    ]
+  },
+  {
     version: '3.5.0',
     items: [
       '🏠 New "Home" status',
