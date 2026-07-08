@@ -69,6 +69,14 @@
 .peer-row.ramjet .peer-name { color: #f59e0b; }
 .peer-row.ripster .peer-name { color: #f472b6; }
 
+/* Shown next to a peer's name when they have notifications muted (synced) */
+.peer-muted-icon {
+  margin-left: 4px;
+  font-size: 11px;
+  opacity: 0.85;
+  vertical-align: middle;
+}
+
 .header-status-extra {
   display: flex;
   flex-wrap: wrap;

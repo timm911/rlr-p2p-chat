@@ -18,6 +18,7 @@ import { getVoiceRecorder } from '../services/voice-recorder'
 import { getVoiceCall, CallState, CallStateInfo } from '../services/voice-call'
 import { playSelectedNotification } from '../services/notification-sound'
 import { getSilenceTimeoutMs, getNoSpeechTimeoutMs } from '../utils/voice-timeouts'
+import { listCustomStatuses, CUSTOM_STATUSES_CHANGED_EVENT } from '../utils/custom-statuses'
 import EmojiPicker from './EmojiPicker'
 import MediaGallery from './MediaGallery'
 import ScreenshotPicker from './ScreenshotPicker'
@@ -94,6 +95,11 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
   // lists everyone by name with their own status underneath.
   const [peerStatuses, setPeerStatuses] = useState<Record<string, Status>>(() => {
     try { return JSON.parse(localStorage.getItem('rlrchat-peer-statuses') || '{}') } catch { return {} }
+  })
+  // Whether each OTHER person currently has notifications muted, synced over
+  // the network (mute is otherwise a purely local preference).
+  const [peerMuted, setPeerMuted] = useState<Record<string, boolean>>(() => {
+    try { return JSON.parse(localStorage.getItem('rlrchat-peer-muted') || '{}') } catch { return {} }
   })
   // Who is actually online right now (derived from presence heartbeats). Starts
   // empty every launch — presence is live state, never restored from disk.
@@ -274,6 +280,11 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
       setTTSSpeakingState(false)
       voiceMessageQueueRef.current = []
     }
+    void window.electronAPI.sendMessage({
+      type: 'mute',
+      payload: { muted: next, from: userIdentity },
+      timestamp: Date.now()
+    })
   }
 
   const setTTSSpeakingState = (value: boolean) => {
@@ -308,6 +319,11 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
     peerStatusesRef.current = peerStatuses
     try { localStorage.setItem('rlrchat-peer-statuses', JSON.stringify(peerStatuses)) } catch {}
   }, [peerStatuses])
+
+  // Remember each peer's last-known mute state across restarts
+  useEffect(() => {
+    try { localStorage.setItem('rlrchat-peer-muted', JSON.stringify(peerMuted)) } catch {}
+  }, [peerMuted])
 
   // Presence: broadcast a small heartbeat so others know we're alive, and
   // recompute who is online from the last time we heard from each person. A
@@ -570,6 +586,21 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
       handleStatusChangeRef.current(status as Status)
     })
     return off
+  }, [])
+
+  // Keep the main process's copy of custom statuses in sync so the tray "Set
+  // status" submenu can include them (main can't read renderer localStorage).
+  useEffect(() => {
+    const sync = () => {
+      try {
+        window.electronAPI.syncCustomStatuses(
+          listCustomStatuses().map((s) => ({ emoji: s.emoji, label: s.label }))
+        )
+      } catch (_) {}
+    }
+    sync()
+    window.addEventListener(CUSTOM_STATUSES_CHANGED_EVENT, sync)
+    return () => window.removeEventListener(CUSTOM_STATUSES_CHANGED_EVENT, sync)
   }, [])
 
   // Quiet-hours indicator poll: re-evaluate every 30s so the 🌙 header badge
@@ -1072,6 +1103,9 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
           announceEvent(`${statusFrom} is now ${newStatus}`)
         }
         setPeerStatuses(prev => ({ ...prev, [statusFrom]: newStatus }))
+      } else if (msg.type === 'mute') {
+        const muteFrom = msg.payload.from || peerName
+        setPeerMuted(prev => ({ ...prev, [muteFrom]: !!msg.payload.muted }))
       } else if (msg.type === 'reaction') {
         // Handle incoming reaction from peer (add)
         setMessages(prev => prev.map(message => {
@@ -1244,6 +1278,12 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
         void window.electronAPI.sendMessage({
           type: 'status',
           payload: { status: myStatusRef.current, from: userIdentity },
+          timestamp: Date.now()
+        })
+        // Re-broadcast my current mute state too, for the same reason.
+        void window.electronAPI.sendMessage({
+          type: 'mute',
+          payload: { muted: soundService.isMuted(), from: userIdentity },
           timestamp: Date.now()
         })
         // Tell peers our app version — if they're newer, we'll update; if we're
@@ -1988,14 +2028,14 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
         if (isVoiceResponseModeRef.current) {
           await endVoiceResponseMode(true) // true = process queue after
         } else {
-          // Manual mic mode - clear input. If messages came in WHILE the user
-          // was dictating (they were deferred, not interrupted), now that the
-          // user's message is sent, stop the manual session and read them.
+          // Manual mic mode: the silence timer already sent the message, so
+          // stop the mic too — mirrors clicking the stop button instead of
+          // leaving it listening indefinitely for more speech.
           setInputText('')
           setSpeechPreview('')
+          await stopSpeechSession()
           if (voiceMessageQueueRef.current.length > 0 &&
               (myStatusRef.current === 'Talk to me' || myStatusRef.current === 'Listen only')) {
-            await stopSpeechSession()
             if (myStatusRef.current === 'Talk to me') {
               await processVoiceQueue()
             } else {
@@ -2692,7 +2732,19 @@ function ChatWindow({ userIdentity, connectionConfig, onDisconnect, onLogoff }: 
               const online = isConnected && onlinePeers.has(name)
               return (
                 <div className={`peer-row ${name.toLowerCase()}`} key={name}>
-                  <div className="peer-name">{name}</div>
+                  <div className="peer-name">
+                    {name}
+                    {peerMuted[name] && (
+                      <span
+                        className="peer-muted-icon"
+                        title={`${name} has notifications muted`}
+                        role="img"
+                        aria-label={`${name} has notifications muted`}
+                      >
+                        🔇
+                      </span>
+                    )}
+                  </div>
                   <div className="connection-status">
                     <span className={`status-dot ${online ? 'connected' : 'disconnected'}`} />
                     {online ? (peerStatuses[name] || '—') : 'Offline'}

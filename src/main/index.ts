@@ -28,6 +28,11 @@ let trayBalloonShown = false // one-time "still running in the tray" hint
 
 // Keep in sync with PRESET_STATUSES in src/renderer/utils/custom-statuses.ts.
 const PRESET_STATUS_LABELS = ['Talk to me', 'Listen only', 'BRB', 'Bed', 'Dinner', 'TV', 'Away', 'Company', 'Home']
+// User-defined statuses (src/renderer/utils/custom-statuses.ts) live in renderer
+// localStorage, which the main process can't read directly. The renderer pushes
+// its current list here over IPC (on load and whenever it changes) so the tray
+// menu can include them.
+let customStatuses: { emoji: string; label: string }[] = []
 
 function getAppSettingsPath(): string {
   return join(app.getPath('userData'), 'app-settings.json')
@@ -54,6 +59,29 @@ function showMainWindow(): void {
   mainWindow.focus()
 }
 
+function buildTrayMenu(): Menu {
+  const setStatusSubmenu: Electron.MenuItemConstructorOptions[] = PRESET_STATUS_LABELS.map((label) => ({
+    label,
+    click: () => mainWindow?.webContents.send('tray:set-status', label)
+  }))
+  if (customStatuses.length > 0) {
+    setStatusSubmenu.push({ type: 'separator' })
+    for (const s of customStatuses) {
+      setStatusSubmenu.push({
+        label: `${s.emoji} ${s.label}`.trim(),
+        click: () => mainWindow?.webContents.send('tray:set-status', s.label)
+      })
+    }
+  }
+  return Menu.buildFromTemplate([
+    { label: 'Open RLR P2P Chat', click: showMainWindow },
+    { type: 'separator' },
+    { label: 'Set status', submenu: setStatusSubmenu },
+    { type: 'separator' },
+    { label: 'Quit', click: () => { isQuitting = true; app.quit() } }
+  ])
+}
+
 function createTray(): void {
   if (tray) return
   try {
@@ -63,20 +91,7 @@ function createTray(): void {
     return
   }
   tray.setToolTip('RLR P2P Chat')
-  const menu = Menu.buildFromTemplate([
-    { label: 'Open RLR P2P Chat', click: showMainWindow },
-    { type: 'separator' },
-    {
-      label: 'Set status',
-      submenu: PRESET_STATUS_LABELS.map((label) => ({
-        label,
-        click: () => mainWindow?.webContents.send('tray:set-status', label)
-      }))
-    },
-    { type: 'separator' },
-    { label: 'Quit', click: () => { isQuitting = true; app.quit() } }
-  ])
-  tray.setContextMenu(menu)
+  tray.setContextMenu(buildTrayMenu())
   tray.on('click', showMainWindow)
   tray.on('double-click', showMainWindow)
 }
@@ -314,6 +329,15 @@ ipcMain.handle('app:set-close-to-tray', (_event, enabled: boolean) => {
   closeToTray = !!enabled
   saveAppSettings()
   return closeToTray
+})
+
+// Renderer pushes its custom-status list (localStorage-backed) here so the
+// tray "Set status" submenu can include them even while minimized.
+ipcMain.on('custom-statuses:sync', (_event, list: { emoji: string; label: string }[]) => {
+  customStatuses = Array.isArray(list)
+    ? list.filter((s): s is { emoji: string; label: string } => !!s && typeof s.label === 'string')
+    : []
+  if (tray) tray.setContextMenu(buildTrayMenu())
 })
 
 app.whenReady().then(() => {

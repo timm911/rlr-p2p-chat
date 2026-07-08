@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('tray:set-status', handler)
     return () => ipcRenderer.removeListener('tray:set-status', handler)
   },
+  syncCustomStatuses: (list: { emoji: string; label: string }[]) => ipcRenderer.send('custom-statuses:sync', list),
 
   // Auto-update status
   onUpdateStatus: (callback: (s: { status: string; info?: any }) => void) => {
@@ -221,6 +222,7 @@ export interface ElectronAPI {
   getCloseToTray: () => Promise<boolean>
   setCloseToTray: (enabled: boolean) => Promise<boolean>
   onTraySetStatus: (callback: (status: string) => void) => () => void
+  syncCustomStatuses: (list: { emoji: string; label: string }[]) => void
   onUpdateStatus: (callback: (s: { status: string; info?: any }) => void) => () => void
   updateCheck: () => Promise<{ ok: boolean; version?: string; reason?: string }>
   updateGetVersion: () => Promise<string>
